@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workshop Integrasi SIMRS - Mirth Connect - Orthanc PACS - SatuSehat</title>
+  <meta name="description" content="Workshop praktis (hands-on) membangun integrasi alur kerja radiologi terstandar HL7 & DICOM serta sinkronisasi SatuSehat Kemenkes menggunakan teknologi PACS open-source.">
+  <link rel="stylesheet" href="style.css">
+  <!-- FontAwesome for Premium Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Background Grids & Orbs -->
+  <div class="cyber-background"></div>
+  <div class="glow-orb glow-orb-1"></div>
+  <div class="glow-orb glow-orb-2"></div>
+
+  <!-- Header Section -->
+  <header>
+    <div class="container nav-container">
+      <a href="#" class="logo" id="nav-logo">
+        <div class="logo-icon"><i class="fa-solid fa-laptop-medical"></i></div>
+        <span>HealthTech<span>Integrasi</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="#benefits">Manfaat</a></li>
+          <li><a href="#simulator">Simulasi Alur</a></li>
+          <li><a href="#syllabus">Syllabus</a></li>
+          <li><a href="#register">Daftar</a></li>
+        </ul>
+      </nav>
+      <a href="#register" class="nav-cta" id="nav-cta-btn">Daftar Sekarang</a>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero" id="hero-section">
+    <div class="container hero-grid">
+      <div class="hero-content">
+        <div class="hero-badges">
+          <span class="hero-badge"><i class="fa-solid fa-code"></i> Live Coding</span>
+          <span class="hero-badge"><i class="fa-solid fa-cubes"></i> Integrasi Sistem</span>
+          <span class="hero-badge highlight"><i class="fa-solid fa-shield-halved"></i> Standar Kemenkes RI</span>
+        </div>
+        <h1>
+          Membangun Alur <span class="gradient-text">Radiologi Otomatis</span> & Kepatuhan SatuSehat
+        </h1>
+        <p class="hero-subtitle">
+          Hilangkan kesalahan input manual pasien di modalitas (Rontgen/USG/CT). Hubungkan SIMRS dengan Orthanc PACS menggunakan Mirth Connect (HL7) dan integrasikan data pemeriksaan ke SatuSehat secara otomatis.
+        </p>
+        <div class="hero-buttons">
+          <a href="#register" class="btn btn-primary" id="hero-register-btn">
+            <i class="fa-solid fa-user-plus"></i> Amankan Kursi Anda
+          </a>
+          <a href="#simulator" class="btn btn-secondary" id="hero-explore-btn">
+            <i class="fa-solid fa-circle-play"></i> Lihat Cara Kerja
+          </a>
+        </div>
+      </div>
+      <div class="hero-image-container">
+        <div class="hero-image-wrapper">
+          <img src="assets/workshop_banner.png" alt="Hospital tech integration illustration" class="hero-image" id="hero-visual-image">
+          <div class="floating-stats-badge">
+            <div class="stat-item">
+              <div class="stat-val">100%</div>
+              <div class="stat-lbl">Hands-on</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-val">HL7/DICOM</div>
+              <div class="stat-lbl">Standard</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-val">RME</div>
+              <div class="stat-lbl">SatuSehat</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Benefits Section -->
+  <section class="section-padding" id="benefits">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Mengapa Harus Ikut?</span>
+        <h2>Tantangan Terbesar Fasyankes & Solusinya</h2>
+        <p>Tinggalkan metode lama yang rentan kesalahan dan memakan biaya lisensi tinggi. Pelajari implementasi PACS berbasis open-source berskala industri.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Card 1 -->
+        <div class="feature-card" id="benefit-card-1">
+          <div class="feature-icon"><i class="fa-solid fa-money-bill-transfer"></i></div>
+          <h3>Hemat Biaya Lisensi PACS</h3>
+          <p>Membangun Picture Archiving & Communication System (PACS) menggunakan Orthanc PACS gratis dan andal tanpa ketergantungan vendor lisensi mahal.</p>
+        </div>
+        <!-- Card 2 -->
+        <div class="feature-card" id="benefit-card-2">
+          <div class="feature-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+          <h3>Otomatisasi Worklist</h3>
+          <p>Kirim data pendaftaran pasien (HL7 ORM) dari SIMRS ke Mirth Connect hingga otomatis terbit sebagai Modality Worklist (MWL) di mesin Rontgen/USG.</p>
+        </div>
+        <!-- Card 3 -->
+        <div class="feature-card" id="benefit-card-3">
+          <div class="feature-icon"><i class="fa-solid fa-server"></i></div>
+          <h3>PACS Native Hosting</h3>
+          <p>Mempelajari hosting frontend JawaraLite langsung di dalam Orthanc menggunakan plugin Serve Folders. Menghemat konfigurasi server dan bebas masalah CORS.</p>
+        </div>
+        <!-- Card 4 -->
+        <div class="feature-card" id="benefit-card-4">
+          <div class="feature-icon"><i class="fa-solid fa-cloud-medical"></i></div>
+          <h3>Kesiapan RME SatuSehat</h3>
+          <p>Pelajari standar format interoperabilitas FHIR untuk ImagingStudy dan DiagnosticReport guna menyinkronkan hasil diagnosa ke SatuSehat Kemenkes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Simulator Section -->
+  <section class="section-padding" id="simulator">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Simulator Interaktif</span>
+        <h2>Alur Integrasi Data End-to-End</h2>
+        <p>Klik tombol simulasi di bawah untuk melihat bagaimana data pasien bergerak secara otomatis dari pendaftaran SIMRS hingga terunggah ke platform SatuSehat Kemenkes.</p>
+      </div>
+
+      <div class="simulator-box" id="interact-simulator">
+        <!-- Interactive Diagram -->
+        <div class="sim-graphic" id="diagram-area">
+          
+          <!-- Connections SVG Overlay -->
+          <svg class="sim-connections" id="svg-connections">
+            <defs>
+              <linearGradient id="active-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f2fe" />
+                <stop offset="100%" stop-color="#ab34eb" />
+              </linearGradient>
+            </defs>
+            
+            <!-- Connection Paths -->
+            <path id="path-1" class="connection-line" d="M 120 70 L 220 70" />
+            <path id="path-1-active" class="connection-line-active" d="M 120 70 L 220 70" />
+            
+            <path id="path-2" class="connection-line" d="M 290 100 L 290 160" />
+            <path id="path-2-active" class="connection-line-active" d="M 290 100 L 290 160" />
+            
+            <path id="path-3" class="connection-line" d="M 220 200 L 120 200" />
+            <path id="path-3-active" class="connection-line-active" d="M 220 200 L 120 200" />
+            
+            <path id="path-4" class="connection-line" d="M 70 230 L 70 300" />
+            <path id="path-4-active" class="connection-line-active" d="M 70 230 L 70 300" />
+            
+            <path id="path-5" class="connection-line" d="M 120 330 L 220 330" />
+            <path id="path-5-active" class="connection-line-active" d="M 120 330 L 220 330" />
+
+            <circle id="dot-1" class="glowing-dot" r="5" />
+          </svg>
+
+          <!-- Row 1: SIMRS and Mirth Connect -->
+          <div class="sim-row">
+            <div class="sim-node" id="node-simrs">
+              <i class="fa-solid fa-hospital-user"></i>
+              <span>1. SIMRS</span>
+              <small>Mengirim Order (ORM)</small>
+            </div>
+            
+            <div class="sim-node" id="node-mirth">
+              <i class="fa-solid fa-circle-nodes"></i>
+              <span>2. Mirth Connect</span>
+              <small>HL7 Interoperability</small>
+            </div>
+          </div>
+
+          <!-- Row 2: Node.js Receiver & Orthanc PACS -->
+          <div class="sim-row">
+            <div class="sim-node" id="node-orthanc">
+              <i class="fa-solid fa-server"></i>
+              <span>4. Orthanc PACS</span>
+              <small>DICOM Storage & MWL</small>
+            </div>
+
+            <div class="sim-node" id="node-receiver">
+              <i class="fa-solid fa-gears"></i>
+              <span>3. WL Receiver</span>
+              <small>Node.js + DCMTK</small>
+            </div>
+          </div>
+
+          <!-- Row 3: JawaraLite & SatuSehat -->
+          <div class="sim-row">
+            <div class="sim-node" id="node-viewer">
+              <i class="fa-solid fa-eye"></i>
+              <span>5. JawaraLite</span>
+              <small>HTML5 DICOM Viewer</small>
+            </div>
+
+            <div class="sim-node" id="node-satusehat">
+              <i class="fa-solid fa-circle-check"></i>
+              <span>6. SatuSehat</span>
+              <small>Kemenkes HIE (FHIR)</small>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Terminal Console -->
+        <div class="sim-console" id="console-area">
+          <div class="console-header">
+            <div class="dot dot-red"></div>
+            <div class="dot dot-yellow"></div>
+            <div class="dot dot-green"></div>
+            <div class="console-title">Integrasi Terminal Log</div>
+          </div>
+          <div class="console-body" id="console-log">
+[System] Siap melakukan simulasi alur data.
+Klik tombol "Mulai Simulasi" di bawah untuk melihat lalu lintas data HL7, DICOM, dan FHIR secara nyata.
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-actions">
+        <button class="sim-btn" id="start-sim-btn">
+          <i class="fa-solid fa-play"></i> Mulai Simulasi
+        </button>
+        <div class="sim-step-text" id="sim-status">Status: Idle</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Syllabus Accordion Section -->
+  <section class="section-padding" id="syllabus">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Kurikulum Praktik</span>
+        <h2>Silabus Pembelajaran Workshop</h2>
+        <p>Kurikulum didesain secara sistematis agar peserta dapat langsung mengimplementasikannya di Rumah Sakit masing-masing.</p>
+      </div>
+
+      <div class="accordion" id="syllabus-accordion">
+        
+        <!-- Module 1 -->
+        <div class="accordion-item" id="m1-accordion">
+          <div class="accordion-header">
+            <div class="accordion-title-box">
+              <div class="accordion-num">01</div>
+              <div class="accordion-title">Modul 1: Arsitektur PACS Modern & Setup Orthanc PACS</div>
+            </div>
+            <div class="accordion-icon"><i class="fa-solid fa-chevron-down"></i></div>
+          </div>
+          <div class="accordion-content">
+            <div class="accordion-body">
+              <p>Mempelajari dasar teknologi PACS berbasis open-source yang efisien dan stabil:</p>
+              <ul>
+                <li>Instalasi PACS Server Orthanc (Lintas Sistem Operasi).</li>
+                <li>Konfigurasi penyimpanan internal dan plugin penting (Serve Folders, Explorer 2, Worklists).</li>
+                <li>Hosting JawaraLite Viewer secara native menggunakan plugin Serve Folders (Solusi Tanpa CORS).</li>
+                <li>Menambahkan aksi pintas peluncuran studi langsung pada antarmuka Orthanc Explorer 2.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Module 2 -->
+        <div class="accordion-item" id="m2-accordion">
+          <div class="accordion-header">
+            <div class="accordion-title-box">
+              <div class="accordion-num">02</div>
+              <div class="accordion-title">Modul 2: Otomatisasi Worklist Modalitas dengan Mirth Connect</div>
+            </div>
+            <div class="accordion-icon"><i class="fa-solid fa-chevron-down"></i></div>
+          </div>
+          <div class="accordion-content">
+            <div class="accordion-body">
+              <p>Membangun jembatan data medis terotomatisasi dari SIMRS hingga ke mesin pemeriksaan (modalitas):</p>
+              <ul>
+                <li>Setup Channel MLLP TCP Listener di Mirth Connect untuk menerima HL7 ORM.</li>
+                <li>Membangun HTTP Sender untuk mem-forward data ke server Node.js Receiver.</li>
+                <li>Parsing HL7 segment PID (Data Pasien) dan OBR (Data Pemeriksaan).</li>
+                <li>Mengompilasi text dump menjadi file DICOM Worklist (.wl) biner menggunakan DCMTK `dump2dcm`.</li>
+                <li>Pengujian query DICOM C-FIND Modality Worklist (MWL) dari modalitas.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Module 3 -->
+        <div class="accordion-item" id="m3-accordion">
+          <div class="accordion-header">
+            <div class="accordion-title-box">
+              <div class="accordion-num">03</div>
+              <div class="accordion-title">Modul 3: Integrasi SIMRS & Web Viewer JawaraLite</div>
+            </div>
+            <div class="accordion-icon"><i class="fa-solid fa-chevron-down"></i></div>
+          </div>
+          <div class="accordion-content">
+            <div class="accordion-body">
+              <p>Menghubungkan rekam medis elektronik SIMRS dengan gambar radiologi secara langsung:</p>
+              <ul>
+                <li>Membuka penampil gambar DICOM JawaraLite menggunakan URL Deep Link.</li>
+                <li>Alur fallback resolusi data: Query otomatis ke PACS via patientID dan accessionNumber.</li>
+                <li>Penanganan degradasi pencarian otomatis apabila nomor aksesi spesifik tidak ditemukan.</li>
+                <li>Render citra medis secara cepat pada peramban web radiolog.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Module 4 -->
+        <div class="accordion-item" id="m4-accordion">
+          <div class="accordion-header">
+            <div class="accordion-title-box">
+              <div class="accordion-num">04</div>
+              <div class="accordion-title">Modul 4: Kepatuhan Regulasi Kemenkes RI & Integrasi SatuSehat</div>
+            </div>
+            <div class="accordion-icon"><i class="fa-solid fa-chevron-down"></i></div>
+          </div>
+          <div class="accordion-content">
+            <div class="accordion-body">
+              <p>Memenuhi kewajiban integrasi Rekam Medis Elektronik Nasional sesuai regulasi Kemenkes RI:</p>
+              <ul>
+                <li>Memahami struktur resource FHIR SatuSehat (`ImagingStudy` & `DiagnosticReport`).</li>
+                <li>Mapping data pemeriksaan radiologi ke payload JSON standar Kemenkes.</li>
+                <li>Autentikasi API SatuSehat (OAuth 2.0 Client Credentials).</li>
+                <li>Enkripsi dan protokol pengiriman data pasien yang aman.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Registration Section -->
+  <section class="section-padding" id="register">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Pendaftaran</span>
+        <h2>Amankan Kursi Workshop Anda</h2>
+        <p>Kelas dirancang interaktif dengan kuota terbatas guna menjamin efektivitas pembelajaran praktik langsung.</p>
+      </div>
+
+      <div class="register-card" id="form-container">
+        <form id="workshop-register-form">
+          <div class="form-group">
+            <label for="reg-name">Nama Lengkap</label>
+            <input type="text" id="reg-name" class="form-control" placeholder="Contoh: Budi Santoso" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="reg-email">Alamat Email</label>
+            <input type="email" id="reg-email" class="form-control" placeholder="Contoh: budi@rumah-sakit.id" required>
+          </div>
+
+          <div class="form-group">
+            <label for="reg-phone">No. WhatsApp</label>
+            <input type="tel" id="reg-phone" class="form-control" placeholder="Contoh: 081234567890" required>
+          </div>
+
+          <div class="form-group">
+            <label for="reg-instansi">Instansi / Rumah Sakit / Klinik</label>
+            <input type="text" id="reg-instansi" class="form-control" placeholder="Contoh: RSUD Sehat Sentosa" required>
+          </div>
+
+          <div class="form-group">
+            <label for="reg-role">Profesi / Jabatan</label>
+            <select id="reg-role" class="form-control" required>
+              <option value="" disabled selected>Pilih Profesi Anda</option>
+              <option value="IT Rumah Sakit">IT Rumah Sakit / SIMRS</option>
+              <option value="Vendor SIMRS">Vendor SIMRS / Developer</option>
+              <option value="Radiografer">Radiografer / Teknisi Medis</option>
+              <option value="Radiolog">Dokter Radiolog</option>
+              <option value="Lainnya">Lainnya</option>
+            </select>
+          </div>
+
+          <div class="checkbox-group">
+            <input type="checkbox" id="reg-agree" required>
+            <label for="reg-agree">Saya menyetujui bahwa data yang diisi benar dan bersedia dihubungi oleh Tim HealthTech Integrasi terkait kebutuhan workshop. <a href="#">Kebijakan Privasi</a></label>
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="width: 100%; border: none; font-size: 1rem;" id="submit-btn">
+            <i class="fa-solid fa-paper-plane"></i> Kirim Formulir Pendaftaran
+          </button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- Success Toast -->
+  <div class="toast" id="success-toast">
+    <i class="fa-solid fa-circle-check" style="font-size: 1.3rem;"></i>
+    <span>Pendaftaran Anda berhasil dikirim! Tim kami akan segera menghubungi Anda.</span>
+  </div>
+
+  <!-- Footer Section -->
+  <footer>
+    <div class="container footer-content">
+      <a href="#" class="logo" id="footer-logo">
+        <div class="logo-icon"><i class="fa-solid fa-laptop-medical"></i></div>
+        <span>HealthTech<span>Integrasi</span></span>
+      </a>
+      <div class="footer-links">
+        <a href="#benefits">Manfaat</a>
+        <a href="#simulator">Simulasi Alur</a>
+        <a href="#syllabus">Silabus</a>
+        <a href="#register">Daftar</a>
+      </div>
+      <div class="footer-disclaimer">
+        Disclaimer: Program workshop ini bersifat independen dan diselenggarakan dalam rangka edukasi interoperabilitas rekam medis elektronik. Orthanc PACS, Mirth Connect, dan SatuSehat adalah merk dagang dari pemiliknya masing-masing.
+      </div>
+      <div class="footer-copyright">
+        &copy; 2026 HealthTech Integrasi. Hak Cipta Dilindungi Undang-Undang.
+      </div>
+    </div>
+  </footer>
+
+  <!-- Simulator & Interactive Scripts -->
+  <script>
+    // --- ACCORDION FUNCTIONALITY ---
+    const accordionHeaders = document.querySelectorAll('.accordion-header');
+    accordionHeaders.forEach(header => {
+      header.addEventListener('click', () => {
+        const item = header.parentElement;
+        const isActive = item.classList.contains('active');
+        
+        // Close all accordion items
+        document.querySelectorAll('.accordion-item').forEach(i => i.classList.remove('active'));
+        
+        // If the clicked item was not active, open it
+        if (!isActive) {
+          item.classList.add('active');
+        }
+      });
+    });
+
+    // Open first accordion item by default
+    document.querySelector('.accordion-item').classList.add('active');
+
+
+    // --- REGISTRATION FORM FUNCTIONALITY ---
+    const form = document.getElementById('workshop-register-form');
+    const toast = document.getElementById('success-toast');
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      
+      // Show success toast
+      toast.classList.add('show');
+      
+      // Reset form
+      form.reset();
+      
+      // Hide toast after 4 seconds
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 4000);
+    });
+
+
+    // --- INTERACTIVE SIMULATOR CODE ---
+    const startSimBtn = document.getElementById('start-sim-btn');
+    const simStatus = document.getElementById('sim-status');
+    const consoleLog = document.getElementById('console-log');
+    
+    // Nodes
+    const nodeSimrs = document.getElementById('node-simrs');
+    const nodeMirth = document.getElementById('node-mirth');
+    const nodeReceiver = document.getElementById('node-receiver');
+    const nodeOrthanc = document.getElementById('node-orthanc');
+    const nodeViewer = document.getElementById('node-viewer');
+    const nodeSatusehat = document.getElementById('node-satusehat');
+    const nodes = [nodeSimrs, nodeMirth, nodeReceiver, nodeOrthanc, nodeViewer, nodeSatusehat];
+
+    // Connection SVG paths & glow dot
+    const dot = document.getElementById('dot-1');
+    const path1Active = document.getElementById('path-1-active');
+    const path2Active = document.getElementById('path-2-active');
+    const path3Active = document.getElementById('path-3-active');
+    const path4Active = document.getElementById('path-4-active');
+    const path5Active = document.getElementById('path-5-active');
+    const activePaths = [path1Active, path2Active, path3Active, path4Active, path5Active];
+
+    // Node Positions relative to diagram wrapper (for moving dot)
+    // We will simulate the coordinates or use simplified text paths
+    const stepLogs = [
+      {
+        node: nodeSimrs,
+        status: "SIMRS: Mengirim Order Pemeriksaan",
+        log: `[SIMRS] User melakukan registrasi pasien dan membuat order Rontgen Thorax.\n` +
+             `[SIMRS] Mengirim HL7 ORM^O01 Message ke Mirth Connect...\n\n` +
+             `<span class="console-highlight">MSH|^~\\&|SIMRS|RS_SATIVA|MIRTH|PACSSERVER|20260603212800||ORM^O01|MSG00001|P|2.4\n` +
+             `PID|1||0030005502||SATIVA^BUDI^^Mr||19900812|M\n` +
+             `ORC|NW|562259^SIMRS|||||||20260603212800\n` +
+             `OBR|1|562259^SIMRS||RAD001^RONTGEN THORAX^LOCAL||||||||||||||CR|||||20260603213000</span>\n\n` +
+             `[INFO] Data pasien: Budi Sativa (ID: 0030005502), Accession: 562259`
+      },
+      {
+        node: nodeMirth,
+        status: "Mirth Connect: Memproses & Meneruskan HL7",
+        log: `[Mirth Connect] Menangkap pesan HL7 ORM dari SIMRS (Port 2575 MLLP).\n` +
+             `[Mirth Connect] Validasi pesan berhasil.\n` +
+             `[Mirth Connect] Mengalirkan raw data HL7 via HTTP POST ke Node.js Worklist Receiver (Port 8090)...\n\n` +
+             `<span class="console-info">HTTP POST / HTTP/1.1\n` +
+             `Host: localhost:8090\n` +
+             `Content-Type: text/plain\n\n` +
+             `MSH|^~\\&|SIMRS|...|PID|1||0030005502|...|OBR|1|562259...</span>\n\n` +
+             `[INFO] Mirth Connect berhasil merutekan pesan tanpa antrean.`
+      },
+      {
+        node: nodeReceiver,
+        status: "WL Receiver: Mengompilasi File DICOM Worklist",
+        log: `[WL Receiver] Node.js menerima HTTP POST payload.\n` +
+             `[WL Receiver] Parsing field HL7 selesai. Modality terdeteksi: CR (Computed Radiography).\n` +
+             `[WL Receiver] Menulis file dump sementara: /tmp/wl_17804967.txt\n` +
+             `[WL Receiver] Menjalankan perintah DCMTK dump2dcm...\n\n` +
+             `<span class="console-highlight">dump2dcm +te "/tmp/wl_17804967.txt" "/WorklistsDatabase/562259.wl"</span>\n\n` +
+             `[WL Receiver] File DICOM Modality Worklist sukses dibuat di: WorklistsDatabase/562259.wl\n` +
+             `[WL Receiver] Menghapus file dump sementara.`
+      },
+      {
+        node: nodeOrthanc,
+        status: "Orthanc PACS: Menyediakan Worklist & Menerima Gambar",
+        log: `[Orthanc PACS] Modul Worklist mendeteksi file baru: 562259.wl.\n` +
+             `[Modalitas CR] Melakukan C-FIND MWL Query ke Orthanc...\n` +
+             `[Orthanc PACS] Merespons query dengan data pasien "Budi Sativa" & Accession "562259".\n` +
+             `[Modalitas CR] Akuisisi gambar selesai. Mengirim file DICOM via C-STORE ke Orthanc...\n\n` +
+             `<span class="console-info">DICOM C-STORE Request\n` +
+             `AET: ORTHANC <- MODALITY_CR\n` +
+             `SOP Instance UID: 2.25.123898129837198273918273...</span>\n\n` +
+             `[Orthanc PACS] Gambar DICOM berhasil disimpan di database storage.`
+      },
+      {
+        node: nodeViewer,
+        status: "JawaraLite: Membuka Studi Citra Medis",
+        log: `[SIMRS] Dokter membuka rekam medis pasien Budi Sativa.\n` +
+             `[SIMRS] Klik tombol "Lihat Hasil Rontgen" ➡️ Membuka link JawaraLite:\n` +
+             `<span class="console-highlight">http://pacs-server:8042/jawaralite/index.html?patientID=0030005502&accessionNumber=562259</span>\n\n` +
+             `[JawaraLite] Mengambil data dari URL ➡️ Memanggil Orthanc API /tools/find untuk resolve Study UUID.\n` +
+             `[JawaraLite] Menemukan Study UUID Orthanc: c4a3176d-4950eef5-c49eb128-4e339ff7.\n` +
+             `[JawaraLite] Mengambil file gambar rendu slice PNG.\n` +
+             `[JawaraLite] Berhasil merender citra medis di browser dokter.`
+      },
+      {
+        node: nodeSatusehat,
+        status: "SatuSehat HIE: Sinkronisasi Rekam Medis Nasional",
+        log: `[SIMRS/PACS] Integrator mendeteksi pemeriksaan radiologi selesai dikonfirmasi.\n` +
+             `[SatuSehat] Mengirim data log metadata gambar dalam format FHIR ImagingStudy...\n\n` +
+             `<span class="console-highlight">{
+  "resourceType": "ImagingStudy",
+  "status": "available",
+  "subject": { "reference": "Patient/100000000001" },
+  "started": "2026-06-03T21:30:00+07:00",
+  "series": [
+    {
+      "uid": "2.25.10982390182",
+      "modality": { "code": "CR" },
+      "instance": [ { "sopClass": "1.2.840.10008.5.1.4.1.1.1" } ]
+    }
+  ]
+}</span>\n\n` +
+             `[SatuSehat] Respons: HTTP 201 Created (Data RME Nasional sinkron).`
+      }
+    ];
+
+    let currentStep = 0;
+    let simInterval = null;
+
+    function resetSimulation() {
+      // Clear active states
+      nodes.forEach(n => n.classList.remove('active'));
+      activePaths.forEach(p => {
+        p.style.strokeDashoffset = "100";
+        p.style.animation = "none";
+      });
+      dot.classList.remove('active');
+      currentStep = 0;
+      simStatus.textContent = "Status: Idle";
+      startSimBtn.disabled = false;
+      startSimBtn.innerHTML = '<i class="fa-solid fa-play"></i> Mulai Simulasi';
+    }
+
+    function runStep() {
+      if (currentStep >= stepLogs.length) {
+        clearInterval(simInterval);
+        simStatus.textContent = "Status: Simulasi Selesai";
+        startSimBtn.disabled = false;
+        startSimBtn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Reset Simulasi';
+        consoleLog.innerHTML += `\n\n[System] Simulasi alur data terintegrasi selesai dengan sukses!`;
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+        return;
+      }
+
+      const step = stepLogs[currentStep];
+      
+      // Update Node active
+      nodes.forEach(n => n.classList.remove('active'));
+      step.node.classList.add('active');
+
+      // Update active path animations
+      if (currentStep > 0) {
+        const activePath = activePaths[currentStep - 1];
+        activePath.style.animation = "draw 1.5s linear forwards";
+      }
+
+      // Update terminal log
+      if (currentStep === 0) {
+        consoleLog.innerHTML = "";
+      } else {
+        consoleLog.innerHTML += `\n\n---------------------------------------------\n\n`;
+      }
+      consoleLog.innerHTML += step.log;
+      consoleLog.scrollTop = consoleLog.scrollHeight;
+
+      simStatus.textContent = `Status: ${step.status}`;
+      
+      currentStep++;
+    }
+
+    startSimBtn.addEventListener('click', () => {
+      if (startSimBtn.innerHTML.includes('Reset')) {
+        resetSimulation();
+        consoleLog.innerHTML = `[System] Siap melakukan simulasi alur data.\nKlik tombol "Mulai Simulasi" di bawah untuk melihat lalu lintas data HL7, DICOM, dan FHIR secara nyata.`;
+        return;
+      }
+
+      startSimBtn.disabled = true;
+      startSimBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Mensimulasikan...';
+      
+      // Run first step immediately
+      runStep();
+      
+      // Run subsequent steps every 3.5 seconds
+      simInterval = setInterval(runStep, 4000);
+    });
+
+  </script>
+</body>
+</html>
