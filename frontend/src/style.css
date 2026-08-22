@@ -477,6 +477,7 @@ body {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-color);
+  position: relative;
 }
 
 .series-thumbnail img {
@@ -995,4 +996,34 @@ body {
   color: #f59e0b;
   margin-left: 6px;
   font-size: 10px;
+}
+
+/* Cine & Split Run UI */
+.cine-indicator {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  pointer-events: none;
+}
+
+.frame-count-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 9px;
+  font-weight: bold;
+  font-family: var(--font-sans);
+  padding: 1px 3px;
+  border-radius: 2px;
+  pointer-events: none;
 }

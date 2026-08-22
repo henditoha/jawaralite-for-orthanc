@@ -57,7 +57,7 @@ function initViewports() {
     const slider = slot.querySelector('.slice-slider');
     slider.addEventListener('input', (e) => {
       const idx = parseInt(e.target.value);
-      viewer.loadSlice(idx);
+      viewer.jumpToSlice(idx);
     });
 
     // Hook viewport specific toolbar buttons
@@ -85,6 +85,8 @@ function initViewports() {
           showTagsExplorer(viewer);
         } else if (action === 'clear-annotations') {
           viewer.clearAnnotations();
+        } else if (action === 'cine') {
+          viewer.toggleCine();
         }
       });
     });
@@ -528,28 +530,32 @@ async function loadStudySeriesAndOpen(studyId) {
       return numA - numB;
     });
 
-    document.getElementById('series-count').textContent = seriesList.length;
+    // Fetch instances for each series to properly sort them by InstanceNumber
+    await Promise.all(seriesList.map(async (series) => {
+      try {
+        const instRes = await fetch(`${bffUrl}${apiPrefix}/series/${series.ID}/instances`);
+        if (instRes.ok) {
+          const instancesObj = await instRes.json();
+          instancesObj.sort((a, b) => {
+            const numA = parseInt(a.MainDicomTags.InstanceNumber) || 0;
+            const numB = parseInt(b.MainDicomTags.InstanceNumber) || 0;
+            return numA - numB;
+          });
+          series.Instances = instancesObj.map(inst => inst.ID);
+        }
+      } catch (err) {
+        console.error('Failed to sort instances for series:', series.ID);
+      }
+    }));
+
+    // Render the list to DOM
     renderSeriesList(seriesList);
 
-    // Automatically load the first series of this study into viewport 0
-    if (seriesList.length > 0) {
-      const firstSeries = seriesList[0];
-      viewportSeries[0] = firstSeries;
-
-      const slot = document.getElementById('viewport-slot-0');
-      const titleEl = slot.querySelector('.viewport-title');
-      titleEl.textContent = `Series ${firstSeries.MainDicomTags.SeriesNumber || ''} - ${firstSeries.MainDicomTags.SeriesDescription || 'No Desc'}`;
-
-      document.querySelectorAll('.series-card').forEach(card => {
-        if (card.getAttribute('data-series-id') === firstSeries.ID) {
-          card.classList.add('active');
-        } else {
-          card.classList.remove('active');
-        }
-      });
-
-      await viewers[0].setSeries(firstSeries.Instances);
-    }
+    // Automatically load the first series of this study into the active viewport
+    setTimeout(() => {
+      const firstCard = seriesContainer.querySelector('.series-card');
+      if (firstCard) firstCard.click();
+    }, 100);
   } catch (err) {
     console.error(err);
     seriesContainer.replaceChildren();
@@ -575,16 +581,66 @@ function renderSeriesList(seriesList) {
 
   activeSeriesList = seriesList; // Save globally
 
+  const displayItems = [];
   seriesList.forEach(series => {
+    const mod = series.MainDicomTags.Modality || '';
+    if ((mod === 'XA' || mod === 'US') && series.Instances && series.Instances.length > 1) {
+      series.Instances.forEach((instanceId, idx) => {
+        displayItems.push({
+          isSplit: true,
+          series: series,
+          instanceId: instanceId,
+          runIndex: idx + 1,
+          id: `${series.ID}-run-${idx}`
+        });
+      });
+    } else {
+      displayItems.push({
+        isSplit: false,
+        series: series,
+        id: series.ID
+      });
+    }
+  });
+
+  document.getElementById('series-count').textContent = displayItems.length;
+
+  displayItems.forEach(item => {
+    const series = item.series;
     const card = document.createElement('div');
     card.className = 'series-card';
-    card.setAttribute('data-series-id', series.ID); // Add data attribute for lookup
+    card.setAttribute('data-series-id', item.id); 
 
-    // Image Thumbnail (middle instance preview)
+    // Image Thumbnail
     const thumbContainer = document.createElement('div');
     thumbContainer.className = 'series-thumbnail';
     
-    if (series.Instances && series.Instances.length > 0) {
+    if (item.isSplit) {
+      const img = document.createElement('img');
+      img.src = `${bffUrl}${apiPrefix}/instances/${item.instanceId}/preview`;
+      img.alt = 'Run Thumbnail';
+      thumbContainer.appendChild(img);
+      
+      const playBadge = document.createElement('div');
+      playBadge.className = 'cine-indicator';
+      playBadge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+      thumbContainer.appendChild(playBadge);
+      
+      const frameBadge = document.createElement('div');
+      frameBadge.className = 'frame-count-badge';
+      frameBadge.textContent = '...';
+      thumbContainer.appendChild(frameBadge);
+      
+      fetch(`${bffUrl}${apiPrefix}/instances/${item.instanceId}/tags?simplify`)
+        .then(res => res.json())
+        .then(tags => {
+          const frames = parseInt(tags['NumberOfFrames']) || 1;
+          frameBadge.textContent = frames;
+        }).catch(() => {
+          frameBadge.textContent = '1';
+        });
+
+    } else if (series.Instances && series.Instances.length > 0) {
       const midIndex = Math.floor(series.Instances.length / 2);
       const midInstanceId = series.Instances[midIndex];
       const img = document.createElement('img');
@@ -613,7 +669,9 @@ function renderSeriesList(seriesList) {
 
     const number = document.createElement('span');
     number.className = 'patient-id';
-    number.textContent = `Series: ${series.MainDicomTags.SeriesNumber || '?'}`;
+    number.textContent = item.isSplit 
+      ? `Series: ${series.MainDicomTags.SeriesNumber || '?'} - Run ${item.runIndex}`
+      : `Series: ${series.MainDicomTags.SeriesNumber || '?'}`;
     headerRow.appendChild(number);
 
     info.appendChild(headerRow);
@@ -625,29 +683,33 @@ function renderSeriesList(seriesList) {
 
     const meta = document.createElement('div');
     meta.className = 'series-meta';
-    meta.textContent = `${series.Instances.length} Slices | ${series.MainDicomTags.BodyPartExamined || 'Whole Body'}`;
+    meta.textContent = item.isSplit 
+      ? `Run ${item.runIndex} | ${series.MainDicomTags.BodyPartExamined || 'Whole Body'}`
+      : `${series.Instances.length} Slices | ${series.MainDicomTags.BodyPartExamined || 'Whole Body'}`;
     info.appendChild(meta);
 
     card.appendChild(info);
 
     // Click series card: Loads in ACTIVE viewport!
     card.addEventListener('click', () => {
-      // Highlight active series
       document.querySelectorAll('.series-card').forEach(c => c.classList.remove('active'));
       card.classList.add('active');
 
-      // Update viewport tracker
       viewportSeries[activeViewportIndex] = series;
 
       const activeViewer = viewers[activeViewportIndex];
       if (activeViewer) {
-        // Update Viewport Title header
         const slot = document.getElementById(`viewport-slot-${activeViewportIndex}`);
         const titleEl = slot.querySelector('.viewport-title');
-        titleEl.textContent = `Series ${series.MainDicomTags.SeriesNumber || ''} - ${series.MainDicomTags.SeriesDescription || 'No Desc'}`;
+        titleEl.textContent = item.isSplit
+          ? `Series ${series.MainDicomTags.SeriesNumber || ''} (Run ${item.runIndex}) - ${series.MainDicomTags.SeriesDescription || 'No Desc'}`
+          : `Series ${series.MainDicomTags.SeriesNumber || ''} - ${series.MainDicomTags.SeriesDescription || 'No Desc'}`;
         
-        // Pass instance ids to active viewer
-        activeViewer.setSeries(series.Instances);
+        if (item.isSplit) {
+          activeViewer.setSeries([item.instanceId]);
+        } else {
+          activeViewer.setSeries(series.Instances);
+        }
       }
     });
 
@@ -703,7 +765,8 @@ function updateOverlayText(index, state) {
   const bottomRight = slot.querySelector('.overlay-bottom-right');
   bottomRight.replaceChildren();
   const sliceInfo = document.createElement('div');
-  sliceInfo.textContent = `Slice: ${state.sliceIndex + 1} / ${state.sliceCount}`;
+  const typeLabel = state.isMultiFrame ? 'Frame' : 'Slice';
+  sliceInfo.textContent = `${typeLabel}: ${state.sliceIndex + 1} / ${state.sliceCount}`;
   bottomRight.appendChild(sliceInfo);
   const wlInfo = document.createElement('div');
   wlInfo.textContent = `W: ${state.windowWidth} L: ${state.windowCenter}`;
@@ -720,6 +783,25 @@ function updateOverlayText(index, state) {
   const slider = slot.querySelector('.slice-slider');
   slider.max = state.sliceCount - 1;
   slider.value = state.sliceIndex;
+
+  // Update Cine Button Visual State & Visibility
+  const cineBtn = slot.querySelector('.btn-cine');
+  if (cineBtn) {
+    if (state.sliceCount > 1) {
+      cineBtn.classList.remove('hidden');
+      if (state.isCinePlaying) {
+        cineBtn.classList.add('active');
+        cineBtn.style.color = '#10b981'; // Green playing state
+        cineBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+      } else {
+        cineBtn.classList.remove('active');
+        cineBtn.style.color = '';
+        cineBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>';
+      }
+    } else {
+      cineBtn.classList.add('hidden');
+    }
+  }
 }
 
 // DICOM Tags Editor Logic

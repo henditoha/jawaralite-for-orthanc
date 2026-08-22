@@ -16,6 +16,10 @@ export class DicomViewer {
     // Viewer State
     this.instanceIds = [];
     this.currentSliceIndex = 0;
+    this.currentFrameIndex = 0;
+    this.numberOfFrames = 1;
+    this.imageCache = new Map();
+    this.cineTimeout = null;
     this.zoom = 1.0;
     this.panX = 0;
     this.panY = 0;
@@ -28,6 +32,11 @@ export class DicomViewer {
     this.originalWindowCenter = 40;
     this.invert = false;
     this.activeTool = 'browse';
+
+    // Cine Play state
+    this.isCinePlaying = false;
+    this.cineInterval = null;
+    this.cineFps = 15;
 
     // Annotations storage (all tool outputs stored here)
     this.annotations = [];
@@ -91,6 +100,7 @@ export class DicomViewer {
 
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      this.stopCine(); // Stop auto-play if user interacts
       if (this.activeTool === 'zoom') {
         const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
         this.applyZoom(zoomFactor, e.offsetX, e.offsetY);
@@ -106,10 +116,14 @@ export class DicomViewer {
   async setSeries(instanceIds, startSlice = null) {
     if (!instanceIds || instanceIds.length === 0) return;
 
+    this.stopCine(); // Ensure cine stops when new series is loaded
+    this.isPreloading = false; // Stop any ongoing preloading
     this.instanceIds = instanceIds;
     this.currentSliceIndex = startSlice !== null
       ? startSlice
       : Math.floor(instanceIds.length / 2);
+    this.currentFrameIndex = 0;
+    this.numberOfFrames = 1;
     this.annotations = [];
     this.currentShape = null;
     this.interactionStep = 0;
@@ -120,8 +134,13 @@ export class DicomViewer {
     this.img = null;
     this.imgLoaded = false;
 
-    await this.fetchDicomTags(instanceIds[0]);
-    await this.loadSlice(this.currentSliceIndex);
+    await this.fetchDicomTags(this.instanceIds[this.currentSliceIndex]);
+    await this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
+    
+    // Start background preloading for smooth cine
+    if (this.numberOfFrames > 1) {
+      this.preloadFrames(this.currentSliceIndex);
+    }
   }
 
   async fetchDicomTags(instanceId) {
@@ -139,6 +158,7 @@ export class DicomViewer {
       this.seriesDesc     = tags['0008,103e']?.Value || 'No Description';
       this.seriesNumber   = tags['0020,0011']?.Value || '';
       this.modality       = tags['0008,0060']?.Value || '';
+      this.numberOfFrames = parseInt(tags['0028,0008']?.Value) || 1;
 
       if (tags['0028,1050']?.Value) {
         const centerStr = String(tags['0028,1050'].Value).split('\\')[0];
@@ -169,13 +189,30 @@ export class DicomViewer {
     }
   }
 
-  async loadSlice(index, highFidelityWl = false) {
+  async loadSlice(instanceIndex, frameIndex = 0, highFidelityWl = false) {
     if (!this.instanceIds || this.instanceIds.length === 0) return;
-    const instanceId = this.instanceIds[index];
+    const instanceId = this.instanceIds[instanceIndex];
 
-    let url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/preview`;
-    if (highFidelityWl || (this.windowCenter !== 40 || this.windowWidth !== 400)) {
-      url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/rendered?window-center=${Math.round(this.windowCenter)}&window-width=${Math.round(this.windowWidth)}`;
+    let url;
+    if (this.numberOfFrames > 1) {
+      url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${frameIndex}/preview`;
+      if (highFidelityWl || (this.windowCenter !== 40 || this.windowWidth !== 400)) {
+        url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${frameIndex}/rendered?window-center=${Math.round(this.windowCenter)}&window-width=${Math.round(this.windowWidth)}`;
+      }
+    } else {
+      url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/preview`;
+      if (highFidelityWl || (this.windowCenter !== 40 || this.windowWidth !== 400)) {
+        url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/rendered?window-center=${Math.round(this.windowCenter)}&window-width=${Math.round(this.windowWidth)}`;
+      }
+    }
+
+    if (this.imageCache && this.imageCache.has(url)) {
+      this.img = this.imageCache.get(url);
+      this.imgLoaded = true;
+      if (this.zoom === 1.0 && this.panX === 0 && this.panY === 0) this.fitToScreen();
+      this.render();
+      this.triggerStateChange();
+      return;
     }
 
     try {
@@ -189,12 +226,50 @@ export class DicomViewer {
 
       this.img = img;
       this.imgLoaded = true;
+
+      if (this.imageCache) {
+        this.imageCache.set(url, img);
+        if (this.imageCache.size > 200) {
+          const firstKey = this.imageCache.keys().next().value;
+          this.imageCache.delete(firstKey);
+        }
+      }
+
       if (this.zoom === 1.0 && this.panX === 0 && this.panY === 0) this.fitToScreen();
       this.render();
       this.triggerStateChange();
     } catch (err) {
       console.error(err);
     }
+  }
+
+  async preloadFrames(instanceIndex) {
+    if (!this.instanceIds || this.instanceIds.length === 0) return;
+    const instanceId = this.instanceIds[instanceIndex];
+    if (!instanceId || this.numberOfFrames <= 1) return;
+
+    this.isPreloading = true;
+    for (let i = 0; i < this.numberOfFrames; i++) {
+      // Abort if series changed or user navigated away
+      if (!this.isPreloading || this.instanceIds[instanceIndex] !== instanceId) break;
+      
+      const url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${i}/preview`;
+      if (this.imageCache && !this.imageCache.has(url)) {
+        try {
+          const img = new Image();
+          if (this.isLocalBff) img.crossOrigin = 'anonymous';
+          img.src = url;
+          await new Promise((resolve) => {
+            img.onload = () => {
+              if (this.imageCache) this.imageCache.set(url, img);
+              resolve();
+            };
+            img.onerror = () => resolve();
+          });
+        } catch(e) {}
+      }
+    }
+    this.isPreloading = false;
   }
 
   fitToScreen() {
@@ -206,19 +281,45 @@ export class DicomViewer {
     this.panY = (this.canvas.height - this.img.height * this.zoom) / 2;
   }
 
+  jumpToSlice(idx) {
+    if (this.numberOfFrames > 1) {
+      this.currentFrameIndex = idx;
+      this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
+    } else {
+      this.currentSliceIndex = idx;
+      this.loadSlice(this.currentSliceIndex, 0);
+    }
+  }
+
   changeSlice(direction) {
-    let newIndex = this.currentSliceIndex + direction;
-    if (newIndex < 0) {
-      if (this.onSeriesBoundary) this.onSeriesBoundary(-1);
-      return;
-    }
-    if (newIndex >= this.instanceIds.length) {
-      if (this.onSeriesBoundary) this.onSeriesBoundary(1);
-      return;
-    }
-    if (newIndex !== this.currentSliceIndex) {
-      this.currentSliceIndex = newIndex;
-      this.loadSlice(newIndex);
+    if (this.numberOfFrames > 1) {
+      let newFrame = this.currentFrameIndex + direction;
+      if (newFrame < 0) {
+        if (this.onSeriesBoundary) this.onSeriesBoundary(-1);
+        return;
+      }
+      if (newFrame >= this.numberOfFrames) {
+        if (this.onSeriesBoundary) this.onSeriesBoundary(1);
+        return;
+      }
+      if (newFrame !== this.currentFrameIndex) {
+        this.currentFrameIndex = newFrame;
+        this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
+      }
+    } else {
+      let newIndex = this.currentSliceIndex + direction;
+      if (newIndex < 0) {
+        if (this.onSeriesBoundary) this.onSeriesBoundary(-1);
+        return;
+      }
+      if (newIndex >= this.instanceIds.length) {
+        if (this.onSeriesBoundary) this.onSeriesBoundary(1);
+        return;
+      }
+      if (newIndex !== this.currentSliceIndex) {
+        this.currentSliceIndex = newIndex;
+        this.loadSlice(newIndex, 0);
+      }
     }
   }
 
@@ -244,6 +345,7 @@ export class DicomViewer {
   // ─── Mouse Events ────────────────────────────────────────────────────────────
 
   handleMouseDown(e) {
+    this.stopCine(); // Stop auto-play if user interacts
     this.isDragging = true;
     this.didDrag    = false;
     this.dragStart  = { x: e.offsetX, y: e.offsetY };
@@ -313,7 +415,7 @@ export class DicomViewer {
     if (this.activeTool === 'wl') {
       this.windowWidth  = this.clientWindowWidth;
       this.windowCenter = this.clientWindowCenter;
-      await this.loadSlice(this.currentSliceIndex, true);
+      await this.loadSlice(this.currentSliceIndex, this.currentFrameIndex, true);
 
     } else if (this.activeTool === 'measure' && this.currentShape) {
       const dist = this.calculateDistance(this.currentShape.start, this.currentShape.end);
@@ -506,7 +608,7 @@ export class DicomViewer {
 
     this.clientWindowWidth  = this.windowWidth;
     this.clientWindowCenter = this.windowCenter;
-    this.loadSlice(this.currentSliceIndex, true);
+    this.loadSlice(this.currentSliceIndex, this.currentFrameIndex, true);
     this.triggerStateChange();
   }
 
@@ -522,7 +624,66 @@ export class DicomViewer {
     this.invert = false;
     this.clearAnnotations();
     this.fitToScreen();
-    this.loadSlice(this.currentSliceIndex, true);
+    this.loadSlice(this.currentSliceIndex, this.currentFrameIndex, true);
+  }
+
+  // ─── Cine Play ────────────────────────────────────────────────────────────────
+
+  toggleCine() {
+    if (this.isCinePlaying) {
+      this.stopCine();
+    } else {
+      this.startCine();
+    }
+  }
+
+  startCine() {
+    const totalCount = this.numberOfFrames > 1 ? this.numberOfFrames : this.instanceIds.length;
+    if (totalCount <= 1) return;
+    this.isCinePlaying = true;
+    
+    const playNextFrame = async () => {
+      if (!this.isCinePlaying) return;
+      const startTime = performance.now();
+
+      if (this.numberOfFrames > 1) {
+        if (this.currentFrameIndex >= this.numberOfFrames - 1) {
+          this.currentFrameIndex = 0;
+        } else {
+          this.currentFrameIndex++;
+        }
+        await this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
+      } else {
+        if (this.currentSliceIndex >= this.instanceIds.length - 1) {
+          this.currentSliceIndex = 0;
+        } else {
+          this.currentSliceIndex++;
+        }
+        await this.loadSlice(this.currentSliceIndex, 0);
+      }
+
+      const elapsed = performance.now() - startTime;
+      const targetDelay = 1000 / this.cineFps;
+      const nextDelay = Math.max(0, targetDelay - elapsed);
+
+      this.cineTimeout = setTimeout(playNextFrame, nextDelay);
+    };
+
+    playNextFrame();
+    this.triggerStateChange();
+  }
+
+  stopCine() {
+    this.isCinePlaying = false;
+    if (this.cineTimeout) {
+      clearTimeout(this.cineTimeout);
+      this.cineTimeout = null;
+    }
+    if (this.cineInterval) {
+      clearInterval(this.cineInterval);
+      this.cineInterval = null;
+    }
+    this.triggerStateChange();
   }
 
   // ─── Render Pipeline ──────────────────────────────────────────────────────────
@@ -940,8 +1101,9 @@ export class DicomViewer {
         seriesDesc:     this.seriesDesc,
         seriesNumber:   this.seriesNumber,
         modality:       this.modality,
-        sliceIndex:     this.currentSliceIndex,
-        sliceCount:     this.instanceIds.length,
+        sliceIndex:     this.numberOfFrames > 1 ? this.currentFrameIndex : this.currentSliceIndex,
+        sliceCount:     this.numberOfFrames > 1 ? this.numberOfFrames : this.instanceIds.length,
+        isMultiFrame:   this.numberOfFrames > 1,
         windowCenter:   Math.round(this.isDragging && this.activeTool === 'wl' ? this.clientWindowCenter : this.windowCenter),
         windowWidth:    Math.round(this.isDragging && this.activeTool === 'wl' ? this.clientWindowWidth  : this.windowWidth),
         invert:         this.invert,
