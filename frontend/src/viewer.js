@@ -44,7 +44,7 @@ export class DicomViewer {
     this.originalWindowWidth = 400;
     this.originalWindowCenter = 40;
     this.invert = false;
-    this.activeTool = 'zoom';
+    this.activeTool = 'browse';
     this.presetActive = false;
     this.serverWindowWidth = null;
     this.serverWindowCenter = null;
@@ -141,7 +141,7 @@ export class DicomViewer {
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.stopCine(); // Stop auto-play if user interacts
-      if (this.activeTool === 'zoom') {
+      if (this.activeTool === 'zoom' || e.ctrlKey) {
         const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
         this.applyZoom(zoomFactor, e.offsetX, e.offsetY);
       } else {
