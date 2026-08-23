@@ -1,6 +1,19 @@
 // JawaraLite Viewer - HTML5 Canvas DICOM Engine
 // Tools: browse, zoom, wl, measure, magnify, annotate, ctr, cobb, ellipse, circle
 
+import {
+  projectPointToMidline,
+  calculateCobbGeometry,
+  renderLine,
+  renderEllipse,
+  renderCircle,
+  renderText,
+  renderCtr,
+  renderCtrDragPreview,
+  renderCobb,
+  renderCobbDragPreview
+} from './tools.js';
+
 export class DicomViewer {
   constructor(canvas, onStateChange = null) {
     this.canvas = canvas;
@@ -31,7 +44,10 @@ export class DicomViewer {
     this.originalWindowWidth = 400;
     this.originalWindowCenter = 40;
     this.invert = false;
-    this.activeTool = 'browse';
+    this.activeTool = 'zoom';
+    this.presetActive = false;
+    this.serverWindowWidth = null;
+    this.serverWindowCenter = null;
 
     // Cine Play state
     this.isCinePlaying = false;
@@ -61,6 +77,29 @@ export class DicomViewer {
     this.seriesNumber = 'Unknown';
     this.modality = 'Unknown';
     this.pixelSpacing = { x: 1.0, y: 1.0 };
+    this.hasPixelSpacing = false;
+    this.pixelSpacingSource = 'uncalibrated';
+    this.currentLoadedInstanceId = null;
+
+    // CTR Drag State
+    this.ctrMidTop = null;
+    this.ctrMidBot = null;
+    this.ctrHeartRight = null;
+    this.ctrHeartLeft = null;
+    this.ctrProjA = null;
+    this.ctrProjB = null;
+    this.ctrDistA = 0;
+    this.ctrDistB = 0;
+
+    // Cobb Drag State
+    this.cobbLine1Start = null;
+    this.cobbLine1End = null;
+
+    // W/L Custom State & Drag tracking
+    this.isCustomWl = false;
+    this.wlStartPos = null;
+    this.wlStartWidth = 400;
+    this.wlStartCenter = 40;
 
     // Image Cache
     this.img = null;
@@ -89,13 +128,14 @@ export class DicomViewer {
     this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
     this.canvas.addEventListener('mouseup',   (e) => this.handleMouseUp(e));
+    window.addEventListener('mouseup', (e) => {
+      if (this.isDragging) this.handleMouseUp(e);
+    });
     this.canvas.addEventListener('mouseleave', () => {
-      this.isDragging = false;
       this.showMagnifier = false;
-      if (this.activeTool !== 'ctr' && this.activeTool !== 'cobb' && this.activeTool !== 'annotate') {
-        this.currentShape = null;
+      if (this.isDragging) {
+        this.handleMouseUp({});
       }
-      this.render();
     });
 
     this.canvas.addEventListener('wheel', (e) => {
@@ -133,6 +173,8 @@ export class DicomViewer {
     this.panY = 0;
     this.img = null;
     this.imgLoaded = false;
+    this.isCustomWl = false;
+    this.wlStartPos = null;
 
     await this.fetchDicomTags(this.instanceIds[this.currentSliceIndex]);
     await this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
@@ -160,28 +202,25 @@ export class DicomViewer {
       this.modality       = tags['0008,0060']?.Value || '';
       this.numberOfFrames = parseInt(tags['0028,0008']?.Value) || 1;
 
-      if (tags['0028,1050']?.Value) {
-        const centerStr = String(tags['0028,1050'].Value).split('\\')[0];
-        this.windowCenter = parseFloat(centerStr) || 40;
+      if (!this.isCustomWl) {
+        if (tags['0028,1050']?.Value) {
+          const centerStr = String(tags['0028,1050'].Value).split('\\')[0];
+          this.windowCenter = parseFloat(centerStr) || 40;
+        }
+        if (tags['0028,1051']?.Value) {
+          const widthStr = String(tags['0028,1051'].Value).split('\\')[0];
+          this.windowWidth = parseFloat(widthStr) || 400;
+        }
+        this.clientWindowCenter = this.windowCenter;
+        this.clientWindowWidth  = this.windowWidth;
+        this.originalWindowWidth  = this.windowWidth;
+        this.originalWindowCenter = this.windowCenter;
       }
-      if (tags['0028,1051']?.Value) {
-        const widthStr = String(tags['0028,1051'].Value).split('\\')[0];
-        this.windowWidth = parseFloat(widthStr) || 400;
-      }
-      this.clientWindowCenter = this.windowCenter;
-      this.clientWindowWidth  = this.windowWidth;
-      // Save originals for reset()
-      this.originalWindowWidth  = this.windowWidth;
-      this.originalWindowCenter = this.windowCenter;
 
-      const spacing = tags['0028,0030']?.Value;
-      if (spacing) {
-        const parts = String(spacing).split('\\');
-        this.pixelSpacing.y = parseFloat(parts[0]) || 1.0;
-        this.pixelSpacing.x = parseFloat(parts[1]) || 1.0;
-      } else {
-        this.pixelSpacing = { x: 1.0, y: 1.0 };
-      }
+      const parsedSpacing = this.parsePixelSpacing(tags);
+      this.pixelSpacing = parsedSpacing.spacing;
+      this.hasPixelSpacing = parsedSpacing.hasSpacing;
+      this.pixelSpacingSource = parsedSpacing.source;
 
       this.triggerStateChange();
     } catch (err) {
@@ -189,21 +228,115 @@ export class DicomViewer {
     }
   }
 
-  async loadSlice(instanceIndex, frameIndex = 0, highFidelityWl = false) {
+  parsePixelSpacing(tags) {
+    if (!tags) return { spacing: { x: 1.0, y: 1.0 }, hasSpacing: false, source: 'uncalibrated' };
+
+    // Hierarchical list of DICOM tags to check for Pixel Spacing:
+    // 1. (0028,0030) Pixel Spacing (Row Spacing \ Column Spacing)
+    // 2. (0018,1164) Imager Pixel Spacing (common in CR/DX X-rays)
+    // 3. (0028,0901) Reconstructed Pixel Spacing
+    // 4. (0018,7022) Detector Element Spacing
+    const candidates = [
+      { key: '0028,0030', name: 'PixelSpacing' },
+      { key: 'PixelSpacing', name: 'PixelSpacing' },
+      { key: '0018,1164', name: 'ImagerPixelSpacing' },
+      { key: 'ImagerPixelSpacing', name: 'ImagerPixelSpacing' },
+      { key: '0028,0901', name: 'ReconstructedPixelSpacing' },
+      { key: 'ReconstructedPixelSpacing', name: 'ReconstructedPixelSpacing' },
+      { key: '0018,7022', name: 'DetectorElementSpacing' },
+      { key: 'DetectorElementSpacing', name: 'DetectorElementSpacing' },
+    ];
+
+    for (const cand of candidates) {
+      const tagObj = tags[cand.key];
+      if (!tagObj) continue;
+
+      let rawVal = typeof tagObj === 'object' && tagObj !== null && 'Value' in tagObj ? tagObj.Value : tagObj;
+      if (!rawVal) continue;
+
+      let row = null; // Y spacing (Row Spacing in DICOM standard)
+      let col = null; // X spacing (Column Spacing in DICOM standard)
+
+      if (Array.isArray(rawVal)) {
+        if (rawVal.length >= 2) {
+          row = parseFloat(rawVal[0]);
+          col = parseFloat(rawVal[1]);
+        } else if (rawVal.length === 1 && rawVal[0] !== undefined) {
+          const parts = String(rawVal[0]).split(/[\\\/,]/);
+          if (parts.length >= 2) {
+            row = parseFloat(parts[0]);
+            col = parseFloat(parts[1]);
+          }
+        }
+      } else if (typeof rawVal === 'number') {
+        row = rawVal;
+        col = rawVal;
+      } else if (typeof rawVal === 'string') {
+        const parts = rawVal.trim().split(/[\\\/,]/);
+        if (parts.length >= 2) {
+          row = parseFloat(parts[0]);
+          col = parseFloat(parts[1]);
+        } else if (parts.length === 1) {
+          const val = parseFloat(parts[0]);
+          if (!isNaN(val)) {
+            row = val;
+            col = val;
+          }
+        }
+      }
+
+      if (row !== null && col !== null && !isNaN(row) && !isNaN(col) && row > 0 && col > 0) {
+        return {
+          spacing: { x: col, y: row }, // DICOM standard: [0] = Row Spacing (Y), [1] = Column Spacing (X)
+          hasSpacing: true,
+          source: cand.name
+        };
+      }
+    }
+
+    // Fallback: Check Pixel Aspect Ratio (0028,0034) for non-square pixel aspect ratio if physical spacing is absent
+    const aspectRatioObj = tags['0028,0034'] || tags['PixelAspectRatio'];
+    if (aspectRatioObj) {
+      let rawAspect = typeof aspectRatioObj === 'object' && aspectRatioObj !== null && 'Value' in aspectRatioObj ? aspectRatioObj.Value : aspectRatioObj;
+      let rY = null, rX = null;
+      if (Array.isArray(rawAspect) && rawAspect.length >= 2) {
+        rY = parseFloat(rawAspect[0]);
+        rX = parseFloat(rawAspect[1]);
+      } else if (typeof rawAspect === 'string') {
+        const parts = rawAspect.trim().split(/[\\\/,]/);
+        if (parts.length >= 2) {
+          rY = parseFloat(parts[0]);
+          rX = parseFloat(parts[1]);
+        }
+      }
+      if (rY !== null && rX !== null && !isNaN(rY) && !isNaN(rX) && rY > 0 && rX > 0) {
+        return {
+          spacing: { x: rX / rY, y: 1.0 },
+          hasSpacing: false,
+          source: 'PixelAspectRatio'
+        };
+      }
+    }
+
+    return { spacing: { x: 1.0, y: 1.0 }, hasSpacing: false, source: 'uncalibrated' };
+  }
+
+  async loadSlice(instanceIndex, frameIndex = 0) {
     if (!this.instanceIds || this.instanceIds.length === 0) return;
     const instanceId = this.instanceIds[instanceIndex];
 
-    let url;
-    if (this.numberOfFrames > 1) {
-      url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${frameIndex}/preview`;
-      if (highFidelityWl || (this.windowCenter !== 40 || this.windowWidth !== 400)) {
-        url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${frameIndex}/rendered?window-center=${Math.round(this.windowCenter)}&window-width=${Math.round(this.windowWidth)}`;
-      }
-    } else {
-      url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/preview`;
-      if (highFidelityWl || (this.windowCenter !== 40 || this.windowWidth !== 400)) {
-        url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/rendered?window-center=${Math.round(this.windowCenter)}&window-width=${Math.round(this.windowWidth)}`;
-      }
+    // Ensure DICOM tags and pixel spacing are updated if slice/instance changed
+    if (this.currentLoadedInstanceId !== instanceId) {
+      this.currentLoadedInstanceId = instanceId;
+      await this.fetchDicomTags(instanceId);
+    }
+
+    let url = (this.numberOfFrames > 1)
+      ? `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${frameIndex}/rendered`
+      : `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/rendered`;
+
+    if (this.presetActive && this.serverWindowWidth && this.serverWindowCenter !== null) {
+      url += `?window-center=${this.serverWindowCenter}&window-width=${this.serverWindowWidth}`;
     }
 
     if (this.imageCache && this.imageCache.has(url)) {
@@ -253,7 +386,10 @@ export class DicomViewer {
       // Abort if series changed or user navigated away
       if (!this.isPreloading || this.instanceIds[instanceIndex] !== instanceId) break;
       
-      const url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${i}/preview`;
+      let url = `${this.bffUrl}${this.apiPrefix}/instances/${instanceId}/frames/${i}/rendered`;
+      if (this.presetActive && this.serverWindowWidth && this.serverWindowCenter !== null) {
+        url += `?window-center=${this.serverWindowCenter}&window-width=${this.serverWindowWidth}`;
+      }
       if (this.imageCache && !this.imageCache.has(url)) {
         try {
           const img = new Image();
@@ -345,11 +481,17 @@ export class DicomViewer {
   // ─── Mouse Events ────────────────────────────────────────────────────────────
 
   handleMouseDown(e) {
+    if (e.button !== 0) return; // Only Left Click triggers tool drag
     this.stopCine(); // Stop auto-play if user interacts
     this.isDragging = true;
     this.didDrag    = false;
     this.dragStart  = { x: e.offsetX, y: e.offsetY };
-    this.panStart   = { x: this.panX, y: this.panY };
+    if (this.activeTool === 'wl') {
+      this.wlStartPos = { x: e.offsetX, y: e.offsetY };
+      this.wlStartWidth = this.windowWidth;
+      this.wlStartCenter = this.windowCenter;
+      this.canvas.style.cursor = 'grabbing';
+    }
 
     if (!this.imgLoaded) return;
     const imgCoord = this.canvasToImage(e.offsetX, e.offsetY);
@@ -360,11 +502,36 @@ export class DicomViewer {
       this.currentShape = { type: 'ellipse', center: imgCoord, rx: 0, ry: 0 };
     } else if (this.activeTool === 'circle') {
       this.currentShape = { type: 'circle', center: imgCoord, r: 0 };
+    } else if (this.activeTool === 'ctr') {
+      if (this.interactionStep === 0) {
+        this.currentShape = { type: 'ctr-midline', start: imgCoord, end: imgCoord };
+      } else if (this.interactionStep === 1) {
+        this.currentShape = { type: 'ctr-lineA', start: imgCoord, end: imgCoord };
+      } else if (this.interactionStep === 2) {
+        this.currentShape = { type: 'ctr-lineB', start: imgCoord, end: imgCoord };
+      } else if (this.interactionStep === 3) {
+        this.currentShape = { type: 'ctr-lineC', start: imgCoord, end: imgCoord };
+      }
+    } else if (this.activeTool === 'cobb') {
+      if (this.interactionStep === 0) {
+        this.currentShape = { type: 'cobb-line1', start: imgCoord, end: imgCoord };
+      } else if (this.interactionStep === 1) {
+        this.currentShape = { type: 'cobb-line2', start: imgCoord, end: imgCoord };
+      }
     }
   }
 
   handleMouseMove(e) {
     this.mousePos = { x: e.offsetX, y: e.offsetY };
+
+    // Ensure Left Click is still held down during drag
+    if (this.isDragging && (e.buttons & 1) === 0) {
+      this.isDragging = false;
+      this.wlStartPos = null;
+      this.updateCanvasCursor();
+      return;
+    }
+
     const dx = e.offsetX - this.dragStart.x;
     const dy = e.offsetY - this.dragStart.y;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.didDrag = true;
@@ -387,10 +554,22 @@ export class DicomViewer {
       this.panX = this.panStart.x + dx;
       this.panY = this.panStart.y + dy;
       this.render();
-    } else if (this.activeTool === 'wl') {
-      this.clientWindowWidth  = Math.max(1, this.windowWidth  + dx * 2.0);
-      this.clientWindowCenter = this.windowCenter - dy * 1.5;
+    } else if (this.activeTool === 'wl' && this.wlStartPos) {
+      const dxWl = e.offsetX - this.wlStartPos.x;
+      const dyWl = e.offsetY - this.wlStartPos.y;
+
+      const factor = Math.max(0.5, this.wlStartWidth / 300);
+      const newWidth  = Math.max(1, Math.round(this.wlStartWidth + dxWl * factor * 2.0));
+      const newCenter = Math.round(this.wlStartCenter - dyWl * factor * 1.5);
+
+      this.windowWidth = newWidth;
+      this.windowCenter = newCenter;
+      this.clientWindowWidth = newWidth;
+      this.clientWindowCenter = newCenter;
+      this.isCustomWl = true;
+
       this.render();
+      this.triggerStateChange();
     } else if (this.activeTool === 'measure' && this.currentShape) {
       this.currentShape.end = this.canvasToImage(e.offsetX, e.offsetY);
       this.render();
@@ -405,19 +584,31 @@ export class DicomViewer {
       const ddy = imgPt.y - this.currentShape.center.y;
       this.currentShape.r = Math.sqrt(ddx * ddx + ddy * ddy);
       this.render();
+    } else if ((this.activeTool === 'ctr' || this.activeTool === 'cobb') && this.currentShape) {
+      const imgPt = this.canvasToImage(e.offsetX, e.offsetY);
+      this.currentShape.end = imgPt;
+      this.render();
     }
   }
 
-  async handleMouseUp(e) {
-    const wasClick = !this.didDrag;
-    this.isDragging = false;
+  handleMouseUp(e) {
+    const wasClick  = !this.didDrag;
+    const wasWlDrag = this.activeTool === 'wl' && this.wlStartPos;
 
-    if (this.activeTool === 'wl') {
+    this.isDragging = false;
+    this.wlStartPos = null;
+    this.updateCanvasCursor();
+
+    if (wasWlDrag) {
       this.windowWidth  = this.clientWindowWidth;
       this.windowCenter = this.clientWindowCenter;
-      await this.loadSlice(this.currentSliceIndex, this.currentFrameIndex, true);
+      this.isCustomWl   = true;
+    }
 
-    } else if (this.activeTool === 'measure' && this.currentShape) {
+    this.render();
+    this.triggerStateChange();
+
+    if (this.activeTool === 'measure' && this.currentShape) {
       const dist = this.calculateDistance(this.currentShape.start, this.currentShape.end);
       if (dist > 0.5) this.annotations.push(this.currentShape);
       this.currentShape = null;
@@ -434,6 +625,9 @@ export class DicomViewer {
       this.currentShape = null;
       this.render();
 
+    } else if (this.activeTool === 'ctr' && this.currentShape) {
+      this.finishCtrDragStep();
+
     } else if (this.activeTool === 'annotate' && wasClick && this.imgLoaded) {
       const imgCoord = this.canvasToImage(e.offsetX, e.offsetY);
       const text = prompt('Masukkan teks anotasi:');
@@ -442,29 +636,180 @@ export class DicomViewer {
         this.render();
       }
 
-    } else if (this.activeTool === 'ctr' && wasClick && this.imgLoaded) {
-      this.handleCtrClick(e);
-
-    } else if (this.activeTool === 'cobb' && wasClick && this.imgLoaded) {
-      this.handleCobbClick(e);
+    } else if (this.activeTool === 'cobb' && this.currentShape) {
+      this.finishCobbDragStep();
     }
   }
 
-  // ─── Multi-Click Tool Handlers ───────────────────────────────────────────────
+  projectPointToMidline(pt, midTop, midBot) {
+    const sx = this.pixelSpacing.x;
+    const sy = this.pixelSpacing.y;
 
-  handleCtrClick(e) {
-    this.interactionPoints.push(this.canvasToImage(e.offsetX, e.offsetY));
-    this.interactionStep++;
+    const p1 = { x: midTop.x * sx, y: midTop.y * sy };
+    const p2 = { x: midBot.x * sx, y: midBot.y * sy };
+    const vMid = { x: p2.x - p1.x, y: p2.y - p1.y };
+    const lMid = Math.sqrt(vMid.x * vMid.x + vMid.y * vMid.y);
+    const uMid = lMid > 0 ? { x: vMid.x / lMid, y: vMid.y / lMid } : { x: 0, y: 1 };
+    const uNorm = { x: -uMid.y, y: uMid.x };
 
-    if (this.interactionStep === 4) {
-      const [heartLeft, heartRight, chestLeft, chestRight] = this.interactionPoints;
-      const hd  = Math.abs(heartRight.x - heartLeft.x) * this.pixelSpacing.x;
-      const td  = Math.abs(chestRight.x - chestLeft.x) * this.pixelSpacing.x;
-      const ctr = td > 0 ? hd / td : 0;
-      this.annotations.push({ type: 'ctr', heartLeft, heartRight, chestLeft, chestRight, hd, td, ctr });
-      this.interactionStep  = 0;
-      this.interactionPoints = [];
+    const pMm = { x: pt.x * sx, y: pt.y * sy };
+    const w = { x: pMm.x - p1.x, y: pMm.y - p1.y };
+    const t = w.x * uMid.x + w.y * uMid.y;
+    const d = Math.abs(w.x * uNorm.x + w.y * uNorm.y);
+    const projMm = { x: p1.x + t * uMid.x, y: p1.y + t * uMid.y };
+    const projPx = { x: projMm.x / sx, y: projMm.y / sy };
+
+    return { dist: d, projPx };
+  }
+
+  finishCtrDragStep() {
+    if (!this.currentShape) return;
+    const { start, end } = this.currentShape;
+
+    if (this.interactionStep === 0) {
+      if (this.calculateDistance(start, end) > 2) {
+        this.ctrMidTop = start;
+        this.ctrMidBot = end;
+        this.interactionStep = 1;
+      }
+    } else if (this.interactionStep === 1) {
+      const resA = this.projectPointToMidline(end, this.ctrMidTop, this.ctrMidBot);
+      this.ctrHeartRight = end;
+      this.ctrProjA = resA.projPx;
+      this.ctrDistA = resA.dist;
+      this.interactionStep = 2;
+    } else if (this.interactionStep === 2) {
+      const resB = this.projectPointToMidline(end, this.ctrMidTop, this.ctrMidBot);
+      this.ctrHeartLeft = end;
+      this.ctrProjB = resB.projPx;
+      this.ctrDistB = resB.dist;
+      this.interactionStep = 3;
+    } else if (this.interactionStep === 3) {
+      const distC = this.calculateDistance(start, end);
+      if (distC > 2) {
+        const distCardiac = this.ctrDistA + this.ctrDistB;
+        const ctr = distC > 0 ? distCardiac / distC : 0;
+
+        this.annotations.push({
+          type: 'ctr',
+          midTop: this.ctrMidTop,
+          midBot: this.ctrMidBot,
+          heartRight: this.ctrHeartRight,
+          heartLeft: this.ctrHeartLeft,
+          projA: this.ctrProjA,
+          projB: this.ctrProjB,
+          chestLeft: start,
+          chestRight: end,
+          distA: this.ctrDistA,
+          distB: this.ctrDistB,
+          distC: distC,
+          distCardiac: distCardiac,
+          ctr: ctr
+        });
+
+        this.interactionStep = 0;
+        this.ctrMidTop = null;
+        this.ctrMidBot = null;
+        this.ctrHeartRight = null;
+        this.ctrHeartLeft = null;
+        this.ctrProjA = null;
+        this.ctrProjB = null;
+        this.ctrDistA = 0;
+        this.ctrDistB = 0;
+      }
     }
+
+    this.currentShape = null;
+    this.render();
+  }
+
+  calculateCobbGeometry(p0, p1, p2, p3) {
+    const sx = this.pixelSpacing.x;
+    const sy = this.pixelSpacing.y;
+
+    const P0 = { x: p0.x * sx, y: p0.y * sy };
+    const P1 = { x: p1.x * sx, y: p1.y * sy };
+    const P2 = { x: p2.x * sx, y: p2.y * sy };
+    const P3 = { x: p3.x * sx, y: p3.y * sy };
+
+    const M1 = { x: (P0.x + P1.x) / 2, y: (P0.y + P1.y) / 2 };
+    const M2 = { x: (P2.x + P3.x) / 2, y: (P2.y + P3.y) / 2 };
+
+    const v1 = { x: P1.x - P0.x, y: P1.y - P0.y };
+    const v2 = { x: P3.x - P2.x, y: P3.y - P2.y };
+
+    const l1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+    const l2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+
+    const u1 = l1 > 0 ? { x: v1.x / l1, y: v1.y / l1 } : { x: 1, y: 0 };
+    const u2 = l2 > 0 ? { x: v2.x / l2, y: v2.y / l2 } : { x: 1, y: 0 };
+
+    const dot = u1.x * u2.x + u1.y * u2.y;
+    const thetaRad = Math.acos(Math.max(-1, Math.min(1, dot)));
+    let thetaDeg = thetaRad * (180 / Math.PI);
+    if (thetaDeg > 90) thetaDeg = 180 - thetaDeg;
+
+    let n1 = { x: -u1.y, y: u1.x };
+    let n2 = { x: -u2.y, y: u2.x };
+
+    const D = { x: M2.x - M1.x, y: M2.y - M1.y };
+    if (D.x * n1.x + D.y * n1.y < 0) n1 = { x: -n1.x, y: -n1.y };
+    if ((-D.x) * n2.x + (-D.y) * n2.y < 0) n2 = { x: -n2.x, y: -n2.y };
+
+    const det = n1.x * n2.y - n1.y * n2.x;
+    let I_mm;
+    if (Math.abs(det) > 1e-5) {
+      const t1 = ((M2.x - M1.x) * n2.y - (M2.y - M1.y) * n2.x) / det;
+      I_mm = { x: M1.x + t1 * n1.x, y: M1.y + t1 * n1.y };
+    } else {
+      I_mm = { x: (M1.x + M2.x) / 2, y: (M1.y + M2.y) / 2 };
+    }
+
+    const m1_px = { x: M1.x / sx, y: M1.y / sy };
+    const m2_px = { x: M2.x / sx, y: M2.y / sy };
+    const I_px  = { x: I_mm.x / sx, y: I_mm.y / sy };
+
+    return {
+      angle: thetaDeg,
+      mid1: m1_px,
+      mid2: m2_px,
+      intersection: I_px
+    };
+  }
+
+  finishCobbDragStep() {
+    if (!this.currentShape) return;
+    const { start, end } = this.currentShape;
+
+    if (this.interactionStep === 0) {
+      if (this.calculateDistance(start, end) > 2) {
+        this.cobbLine1Start = start;
+        this.cobbLine1End = end;
+        this.interactionStep = 1;
+      }
+    } else if (this.interactionStep === 1) {
+      if (this.calculateDistance(start, end) > 2) {
+        const geom = this.calculateCobbGeometry(this.cobbLine1Start, this.cobbLine1End, start, end);
+
+        this.annotations.push({
+          type: 'cobb',
+          line1Start: this.cobbLine1Start,
+          line1End: this.cobbLine1End,
+          line2Start: start,
+          line2End: end,
+          mid1: geom.mid1,
+          mid2: geom.mid2,
+          intersection: geom.intersection,
+          angle: geom.angle
+        });
+
+        this.interactionStep = 0;
+        this.cobbLine1Start = null;
+        this.cobbLine1End = null;
+      }
+    }
+
+    this.currentShape = null;
     this.render();
   }
 
@@ -490,9 +835,31 @@ export class DicomViewer {
     return Math.sqrt(dx * dx + dy * dy);
   }
 
+  formatDistance(dist) {
+    if (!this.hasPixelSpacing) {
+      return `${dist.toFixed(1)} px`;
+    }
+    if (dist >= 10) {
+      const cm = dist / 10;
+      return `${dist.toFixed(2)} mm (${cm.toFixed(2)} cm)`;
+    }
+    return `${dist.toFixed(2)} mm`;
+  }
+
+  formatArea(areaMm2) {
+    if (!this.hasPixelSpacing) {
+      return `Area: ${areaMm2.toFixed(1)} px²`;
+    }
+    if (areaMm2 >= 100) {
+      const cm2 = areaMm2 / 100;
+      return `Area: ${areaMm2.toFixed(1)} mm² (${cm2.toFixed(2)} cm²)`;
+    }
+    return `Area: ${areaMm2.toFixed(1)} mm²`;
+  }
+
   calculateCobbAngle(p0, p1, p2, p3) {
-    const v1 = { x: p1.x - p0.x, y: p1.y - p0.y };
-    const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+    const v1 = { x: (p1.x - p0.x) * this.pixelSpacing.x, y: (p1.y - p0.y) * this.pixelSpacing.y };
+    const v2 = { x: (p3.x - p2.x) * this.pixelSpacing.x, y: (p3.y - p2.y) * this.pixelSpacing.y };
     const dot  = v1.x * v2.x + v1.y * v2.y;
     const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
     const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
@@ -505,6 +872,16 @@ export class DicomViewer {
   setTool(tool) {
     this.interactionStep  = 0;
     this.interactionPoints = [];
+    this.ctrMidTop = null;
+    this.ctrMidBot = null;
+    this.ctrHeartRight = null;
+    this.ctrHeartLeft = null;
+    this.ctrProjA = null;
+    this.ctrProjB = null;
+    this.ctrDistA = 0;
+    this.ctrDistB = 0;
+    this.cobbLine1Start = null;
+    this.cobbLine1End = null;
     this.currentShape     = null;
     this.showMagnifier    = false;
     this.activeTool       = tool;
@@ -606,9 +983,13 @@ export class DicomViewer {
       this.windowCenter = Math.round(origWC + origWW * p.wcShift);
     }
 
+    this.serverWindowWidth = this.windowWidth;
+    this.serverWindowCenter = this.windowCenter;
+    this.isCustomWl = false;
+    this.presetActive = true;
     this.clientWindowWidth  = this.windowWidth;
     this.clientWindowCenter = this.windowCenter;
-    this.loadSlice(this.currentSliceIndex, this.currentFrameIndex, true);
+    this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
     this.triggerStateChange();
   }
 
@@ -616,7 +997,10 @@ export class DicomViewer {
     this.zoom = 1.0;
     this.panX = 0;
     this.panY = 0;
-    // Restore original DICOM WW/WC, not arbitrary defaults
+    this.isCustomWl = false;
+    this.presetActive = false;
+    this.wlStartPos = null;
+    // Restore original DICOM WW/WC
     this.windowWidth  = this.originalWindowWidth;
     this.windowCenter = this.originalWindowCenter;
     this.clientWindowWidth  = this.originalWindowWidth;
@@ -624,7 +1008,8 @@ export class DicomViewer {
     this.invert = false;
     this.clearAnnotations();
     this.fitToScreen();
-    this.loadSlice(this.currentSliceIndex, this.currentFrameIndex, true);
+    this.loadSlice(this.currentSliceIndex, this.currentFrameIndex);
+    this.triggerStateChange();
   }
 
   // ─── Cine Play ────────────────────────────────────────────────────────────────
@@ -705,9 +1090,11 @@ export class DicomViewer {
     ctx.save();
     let filters = [];
     if (this.invert) filters.push('invert(100%)');
-    if (this.isDragging && this.activeTool === 'wl') {
-      const cr = this.windowWidth / this.clientWindowWidth;
-      const bo = (this.windowCenter - this.clientWindowCenter) / this.windowWidth;
+    if (this.isCustomWl) {
+      const baseWW = this.presetActive ? this.serverWindowWidth : (this.originalWindowWidth || 400);
+      const baseWC = this.presetActive ? this.serverWindowCenter : (this.originalWindowCenter || 40);
+      const cr = baseWW / Math.max(1, this.windowWidth);
+      const bo = (baseWC - this.windowCenter) / baseWW;
       filters.push(`contrast(${Math.max(10, Math.round(cr * 100))}%)`);
       filters.push(`brightness(${Math.max(10, Math.round((1.0 + bo) * 100))}%)`);
     }
@@ -733,28 +1120,51 @@ export class DicomViewer {
 
   renderAnnotations() {
     if (!this.imgLoaded) return;
+    const img2Canvas = (x, y) => this.imageToCanvas(x, y);
+    const fmtDist   = (d) => this.formatDistance(d);
+    const fmtArea   = (a) => this.formatArea(a);
+    const calcDist  = (p1, p2) => this.calculateDistance(p1, p2);
 
     for (const ann of this.annotations) {
       switch (ann.type) {
-        case 'line':    this.renderLine(ann);    break;
-        case 'ellipse': this.renderEllipse(ann); break;
-        case 'circle':  this.renderCircle(ann);  break;
-        case 'text':    this.renderText(ann);    break;
-        case 'ctr':     this.renderCtr(ann);     break;
-        case 'cobb':    this.renderCobb(ann);    break;
+        case 'line':    renderLine(this.ctx, ann, img2Canvas, fmtDist, calcDist); break;
+        case 'ellipse': renderEllipse(this.ctx, ann, this.zoom, this.pixelSpacing, img2Canvas, fmtArea); break;
+        case 'circle':  renderCircle(this.ctx, ann, this.zoom, this.pixelSpacing, img2Canvas, fmtArea);  break;
+        case 'text':    renderText(this.ctx, ann, img2Canvas); break;
+        case 'ctr':     renderCtr(this.ctx, ann, img2Canvas, fmtDist); break;
+        case 'cobb':    renderCobb(this.ctx, ann, img2Canvas); break;
       }
     }
 
-    // In-progress shape
-    if (this.currentShape) {
+    // In-progress CTR & Cobb previews
+    const ctrState = {
+      ctrMidTop: this.ctrMidTop,
+      ctrMidBot: this.ctrMidBot,
+      ctrProjA: this.ctrProjA,
+      ctrHeartRight: this.ctrHeartRight,
+      ctrProjB: this.ctrProjB,
+      ctrHeartLeft: this.ctrHeartLeft,
+      pixelSpacing: this.pixelSpacing
+    };
+
+    const cobbState = {
+      cobbLine1Start: this.cobbLine1Start,
+      cobbLine1End: this.cobbLine1End,
+      pixelSpacing: this.pixelSpacing
+    };
+
+    if (this.activeTool === 'ctr' && (this.interactionStep > 0 || (this.currentShape && this.currentShape.type.startsWith('ctr-')))) {
+      renderCtrDragPreview(this.ctx, this.currentShape, this.interactionStep, ctrState, img2Canvas, fmtDist, calcDist);
+    } else if (this.activeTool === 'cobb' && (this.interactionStep > 0 || (this.currentShape && this.currentShape.type.startsWith('cobb-')))) {
+      renderCobbDragPreview(this.ctx, this.currentShape, this.interactionStep, cobbState, img2Canvas);
+    } else if (this.currentShape) {
       switch (this.currentShape.type) {
-        case 'line':    this.renderLine(this.currentShape);    break;
-        case 'ellipse': this.renderEllipse(this.currentShape); break;
-        case 'circle':  this.renderCircle(this.currentShape);  break;
+        case 'line':    renderLine(this.ctx, this.currentShape, img2Canvas, fmtDist, calcDist); break;
+        case 'ellipse': renderEllipse(this.ctx, this.currentShape, this.zoom, this.pixelSpacing, img2Canvas, fmtArea); break;
+        case 'circle':  renderCircle(this.ctx, this.currentShape, this.zoom, this.pixelSpacing, img2Canvas, fmtArea);  break;
       }
     }
 
-    // In-progress CTR/Cobb points
     if ((this.activeTool === 'ctr' || this.activeTool === 'cobb') && this.interactionPoints.length > 0) {
       this.renderInteractionPoints();
     }
@@ -784,7 +1194,7 @@ export class DicomViewer {
     const dist  = this.calculateDistance(ann.start, ann.end);
     const midX  = (cS.x + cE.x) / 2;
     const midY  = (cS.y + cE.y) / 2;
-    const label = `${dist.toFixed(2)} mm`;
+    const label = this.formatDistance(dist);
     const tw    = ctx.measureText(label).width;
 
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
@@ -802,7 +1212,7 @@ export class DicomViewer {
     const areaX   = ann.rx * this.pixelSpacing.x;
     const areaY   = ann.ry * this.pixelSpacing.y;
     const area    = Math.PI * areaX * areaY;
-    const label   = `Area: ${area.toFixed(1)} mm²`;
+    const label   = this.formatArea(area);
 
     ctx.save();
     ctx.strokeStyle = '#f59e0b';
@@ -827,9 +1237,10 @@ export class DicomViewer {
     const ctx   = this.ctx;
     const cC    = this.imageToCanvas(ann.center.x, ann.center.y);
     const rC    = Math.max(1, ann.r * this.zoom);
-    const rMm   = ann.r * this.pixelSpacing.x;
-    const area  = Math.PI * rMm * rMm;
-    const label = `Area: ${area.toFixed(1)} mm²`;
+    const areaX = ann.r * this.pixelSpacing.x;
+    const areaY = ann.r * this.pixelSpacing.y;
+    const area  = Math.PI * areaX * areaY;
+    const label = this.formatArea(area);
 
     ctx.save();
     ctx.strokeStyle = '#a78bfa';
@@ -881,87 +1292,321 @@ export class DicomViewer {
     ctx.restore();
   }
 
+  renderCtrDragPreview(shape) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+
+    // Draw completed Midline if step >= 1
+    if (this.interactionStep >= 1 && this.ctrMidTop && this.ctrMidBot) {
+      const cMT = this.imageToCanvas(this.ctrMidTop.x, this.ctrMidTop.y);
+      const cMB = this.imageToCanvas(this.ctrMidBot.x, this.ctrMidBot.y);
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath(); ctx.moveTo(cMT.x, cMT.y); ctx.lineTo(cMB.x, cMB.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw completed Line A if step >= 2
+    if (this.interactionStep >= 2 && this.ctrProjA && this.ctrHeartRight) {
+      const cPA = this.imageToCanvas(this.ctrProjA.x, this.ctrProjA.y);
+      const cHR = this.imageToCanvas(this.ctrHeartRight.x, this.ctrHeartRight.y);
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cPA.x, cPA.y); ctx.lineTo(cHR.x, cHR.y); ctx.stroke();
+    }
+
+    // Draw completed Line B if step >= 3
+    if (this.interactionStep >= 3 && this.ctrProjB && this.ctrHeartLeft) {
+      const cPB = this.imageToCanvas(this.ctrProjB.x, this.ctrProjB.y);
+      const cHL = this.imageToCanvas(this.ctrHeartLeft.x, this.ctrHeartLeft.y);
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cPB.x, cPB.y); ctx.lineTo(cHL.x, cHL.y); ctx.stroke();
+    }
+
+    // Draw current dragging line
+    const cS = this.imageToCanvas(shape.start.x, shape.start.y);
+    const cE = this.imageToCanvas(shape.end.x, shape.end.y);
+
+    if (shape.type === 'ctr-midline') {
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath(); ctx.moveTo(cS.x, cS.y); ctx.lineTo(cE.x, cE.y); ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (shape.type === 'ctr-lineA' || shape.type === 'ctr-lineB') {
+      const res = this.projectPointToMidline(shape.end, this.ctrMidTop, this.ctrMidBot);
+      const cP = this.imageToCanvas(res.projPx.x, res.projPx.y);
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cP.x, cP.y); ctx.lineTo(cE.x, cE.y); ctx.stroke();
+
+      const label = shape.type === 'ctr-lineA' ? `A: ${this.formatDistance(res.dist)}` : `B: ${this.formatDistance(res.dist)}`;
+      ctx.fillStyle = '#ef4444';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, (cP.x + cE.x) / 2, (cP.y + cE.y) / 2 - 4);
+    } else if (shape.type === 'ctr-lineC') {
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cS.x, cS.y); ctx.lineTo(cE.x, cE.y); ctx.stroke();
+      const dist = this.calculateDistance(shape.start, shape.end);
+      const label = `C: ${this.formatDistance(dist)}`;
+      ctx.fillStyle = '#facc15';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, (cS.x + cE.x) / 2, (cS.y + cE.y) / 2 - 4);
+    }
+
+    ctx.restore();
+  }
+
   renderCtr(ann) {
     const ctx = this.ctx;
     ctx.save();
     ctx.lineWidth = 2;
-    ctx.font      = 'bold 12px monospace';
+    ctx.font = 'bold 11px monospace';
 
-    // Heart width — blue
-    const cHL = this.imageToCanvas(ann.heartLeft.x,  ann.heartLeft.y);
+    const cMT = this.imageToCanvas(ann.midTop.x, ann.midTop.y);
+    const cMB = this.imageToCanvas(ann.midBot.x, ann.midBot.y);
+
+    // 1. Midline (Purple #c084fc)
+    const dxM = cMB.x - cMT.x;
+    const dyM = cMB.y - cMT.y;
+    const lenM = Math.sqrt(dxM * dxM + dyM * dyM);
+    const ext = 40;
+    const uX = lenM > 0 ? dxM / lenM : 0;
+    const uY = lenM > 0 ? dyM / lenM : 1;
+
+    const cMT_ext = { x: cMT.x - uX * ext, y: cMT.y - uY * ext };
+    const cMB_ext = { x: cMB.x + uX * ext, y: cMB.y + uY * ext };
+
+    ctx.strokeStyle = '#c084fc';
+    ctx.fillStyle = '#c084fc';
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath(); ctx.moveTo(cMT_ext.x, cMT_ext.y); ctx.lineTo(cMB_ext.x, cMB_ext.y); ctx.stroke();
+    ctx.setLineDash([]);
+    [cMT, cMB].forEach(p => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 2 * Math.PI); ctx.fill();
+    });
+
+    // 2. Line A (Red #ef4444)
+    const cPA = this.imageToCanvas(ann.projA.x, ann.projA.y);
     const cHR = this.imageToCanvas(ann.heartRight.x, ann.heartRight.y);
-    ctx.strokeStyle = '#60a5fa';
-    ctx.fillStyle   = '#60a5fa';
-    ctx.beginPath(); ctx.moveTo(cHL.x, cHL.y); ctx.lineTo(cHR.x, cHR.y); ctx.stroke();
-    [cHL, cHR].forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI); ctx.fill(); });
+    ctx.strokeStyle = '#ef4444';
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath(); ctx.moveTo(cPA.x, cPA.y); ctx.lineTo(cHR.x, cHR.y); ctx.stroke();
+    [cPA, cHR].forEach(p => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI); ctx.fill();
+    });
+    const labelA = `A: ${this.formatDistance(ann.distA)}`;
+    const midAX = (cPA.x + cHR.x) / 2;
+    const midAY = (cPA.y + cHR.y) / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    const twA = ctx.measureText(labelA).width;
+    ctx.fillRect(midAX - twA / 2 - 4, midAY - 14, twA + 8, 14);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillText(labelA, midAX, midAY - 3);
 
-    // Chest width — green
-    const cCL = this.imageToCanvas(ann.chestLeft.x,  ann.chestLeft.y);
+    // 3. Line B (Red #ef4444)
+    const cPB = this.imageToCanvas(ann.projB.x, ann.projB.y);
+    const cHL = this.imageToCanvas(ann.heartLeft.x, ann.heartLeft.y);
+    ctx.strokeStyle = '#ef4444';
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath(); ctx.moveTo(cPB.x, cPB.y); ctx.lineTo(cHL.x, cHL.y); ctx.stroke();
+    [cPB, cHL].forEach(p => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI); ctx.fill();
+    });
+    const labelB = `B: ${this.formatDistance(ann.distB)}`;
+    const midBX = (cPB.x + cHL.x) / 2;
+    const midBY = (cPB.y + cHL.y) / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    const twB = ctx.measureText(labelB).width;
+    ctx.fillRect(midBX - twB / 2 - 4, midBY - 14, twB + 8, 14);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillText(labelB, midBX, midBY - 3);
+
+    // 4. Line C (Yellow #facc15)
+    const cCL = this.imageToCanvas(ann.chestLeft.x, ann.chestLeft.y);
     const cCR = this.imageToCanvas(ann.chestRight.x, ann.chestRight.y);
-    ctx.strokeStyle = '#34d399';
-    ctx.fillStyle   = '#34d399';
+    ctx.strokeStyle = '#facc15';
+    ctx.fillStyle = '#facc15';
     ctx.beginPath(); ctx.moveTo(cCL.x, cCL.y); ctx.lineTo(cCR.x, cCR.y); ctx.stroke();
-    [cCL, cCR].forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI); ctx.fill(); });
+    [cCL, cCR].forEach(p => {
+      ctx.beginPath(); ctx.moveTo(p.x, p.y - 8); ctx.lineTo(p.x, p.y + 8); ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI); ctx.fill();
+    });
+    const labelC = `C: ${this.formatDistance(ann.distC)}`;
+    const midCX = (cCL.x + cCR.x) / 2;
+    const midCY = (cCL.y + cCR.y) / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    const twC = ctx.measureText(labelC).width;
+    ctx.fillRect(midCX - twC / 2 - 4, midCY + 4, twC + 8, 14);
+    ctx.fillStyle = '#facc15';
+    ctx.fillText(labelC, midCX, midCY + 15);
 
-    // CTR result label
-    const isNormal   = ann.ctr < 0.5;
-    const color      = isNormal ? '#22c55e' : '#ef4444';
+    // 5. CTR Concise Result Summary Badge
+    const isNormal = ann.ctr <= 0.50;
+    const color = isNormal ? '#22c55e' : '#ef4444';
     const statusText = isNormal ? 'Normal' : 'Kardiomegali';
-    const label      = `CTR: ${ann.ctr.toFixed(3)} — ${statusText}`;
-    const midX       = (cHL.x + cHR.x) / 2;
-    const midY       = Math.min(cHL.y, cHR.y) - 18;
-    const tw         = ctx.measureText(label).width;
+
+    const line1 = `CTR: ${(ann.ctr * 100).toFixed(1)}% — ${statusText}`;
+    const line2 = `A: ${this.formatDistance(ann.distA)} | B: ${this.formatDistance(ann.distB)} | C: ${this.formatDistance(ann.distC)}`;
+
+    ctx.font = 'bold 12px monospace';
+    const tw1 = ctx.measureText(line1).width;
+    ctx.font = '11px monospace';
+    const tw2 = ctx.measureText(line2).width;
+    const boxW = Math.max(tw1, tw2) + 24;
+    const boxH = 42;
+
+    const midX = (cCL.x + cCR.x) / 2;
+    const boxY = Math.max(16, Math.min(cMT.y, cMB.y) - 50);
 
     ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(midX - (tw + 16) / 2, midY - 16, tw + 16, 22);
-    ctx.fillStyle   = color;
-    ctx.textAlign   = 'center';
-    ctx.fillText(label, midX, midY);
+    ctx.fillRect(midX - boxW / 2, boxY, boxW, boxH);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(midX - boxW / 2, boxY, boxW, boxH);
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillStyle = color;
+    ctx.fillText(line1, midX, boxY + 17);
+
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#e4e4e7';
+    ctx.fillText(line2, midX, boxY + 33);
+
     ctx.restore();
   }
 
   renderCobb(ann) {
     const ctx = this.ctx;
     ctx.save();
-    ctx.strokeStyle = '#fb923c';
-    ctx.fillStyle   = '#fb923c';
-    ctx.lineWidth   = 2;
+    ctx.lineWidth = 2;
+    ctx.font = 'bold 12px monospace';
 
     const cL1S = this.imageToCanvas(ann.line1Start.x, ann.line1Start.y);
     const cL1E = this.imageToCanvas(ann.line1End.x,   ann.line1End.y);
     const cL2S = this.imageToCanvas(ann.line2Start.x, ann.line2Start.y);
     const cL2E = this.imageToCanvas(ann.line2End.x,   ann.line2End.y);
+    const cM1  = this.imageToCanvas(ann.mid1.x,         ann.mid1.y);
+    const cM2  = this.imageToCanvas(ann.mid2.x,         ann.mid2.y);
+    const cI   = this.imageToCanvas(ann.intersection.x, ann.intersection.y);
 
-    // Line 1
+    // 1. Line 1 (Superior Endplate) — Solid Orange #fb923c
+    ctx.strokeStyle = '#fb923c';
+    ctx.fillStyle = '#fb923c';
     ctx.beginPath(); ctx.moveTo(cL1S.x, cL1S.y); ctx.lineTo(cL1E.x, cL1E.y); ctx.stroke();
-    // Line 2
+
+    // 2. Line 2 (Inferior Endplate) — Solid Orange #fdba74
     ctx.strokeStyle = '#fdba74';
+    ctx.fillStyle = '#fdba74';
     ctx.beginPath(); ctx.moveTo(cL2S.x, cL2S.y); ctx.lineTo(cL2E.x, cL2E.y); ctx.stroke();
 
     // Endpoint dots
     [cL1S, cL1E, cL2S, cL2E].forEach(p => {
       ctx.fillStyle = '#fb923c';
-      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 2 * Math.PI); ctx.fill();
     });
 
-    // Angle label at midpoint of line 2
-    const midX  = (cL2S.x + cL2E.x) / 2;
-    const midY  = (cL2S.y + cL2E.y) / 2;
+    // 3. Perpendicular Dashed Extension Lines to Intersection
+    ctx.strokeStyle = '#fb923c';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+
+    ctx.beginPath(); ctx.moveTo(cM1.x, cM1.y); ctx.lineTo(cI.x, cI.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cM2.x, cM2.y); ctx.lineTo(cI.x, cI.y); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Intersection vertex dot
+    ctx.fillStyle = '#fb923c';
+    ctx.beginPath(); ctx.arc(cI.x, cI.y, 4, 0, 2 * Math.PI); ctx.fill();
+
+    // 4. Cobb Angle Badge right at the intersection vertex
     const label = `Cobb: ${ann.angle.toFixed(1)}°`;
-    ctx.font    = 'bold 13px monospace';
-    const tw    = ctx.measureText(label).width;
+    const tw = ctx.measureText(label).width;
+
     ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(midX - (tw + 12) / 2, midY - 22, tw + 12, 20);
-    ctx.fillStyle   = '#fb923c';
-    ctx.textAlign   = 'center';
-    ctx.fillText(label, midX, midY - 6);
+    ctx.fillRect(cI.x - tw / 2 - 6, cI.y - 24, tw + 12, 18);
+    ctx.strokeStyle = '#fb923c';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cI.x - tw / 2 - 6, cI.y - 24, tw + 12, 18);
+
+    ctx.fillStyle = '#fb923c';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, cI.x, cI.y - 11);
+
+    ctx.restore();
+  }
+
+  renderCobbDragPreview(shape) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.font = 'bold 12px monospace';
+
+    // Draw completed Line 1 if step >= 1
+    if (this.interactionStep >= 1 && this.cobbLine1Start && this.cobbLine1End) {
+      const cL1S = this.imageToCanvas(this.cobbLine1Start.x, this.cobbLine1Start.y);
+      const cL1E = this.imageToCanvas(this.cobbLine1End.x,   this.cobbLine1End.y);
+      ctx.strokeStyle = '#fb923c';
+      ctx.fillStyle = '#fb923c';
+      ctx.beginPath(); ctx.moveTo(cL1S.x, cL1S.y); ctx.lineTo(cL1E.x, cL1E.y); ctx.stroke();
+      [cL1S, cL1E].forEach(p => {
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 2 * Math.PI); ctx.fill();
+      });
+    }
+
+    // Draw current dragging shape
+    if (shape) {
+      const cS = this.imageToCanvas(shape.start.x, shape.start.y);
+      const cE = this.imageToCanvas(shape.end.x, shape.end.y);
+
+      if (shape.type === 'cobb-line1') {
+        ctx.strokeStyle = '#fb923c';
+        ctx.beginPath(); ctx.moveTo(cS.x, cS.y); ctx.lineTo(cE.x, cE.y); ctx.stroke();
+      } else if (shape.type === 'cobb-line2' && this.cobbLine1Start && this.cobbLine1End) {
+        ctx.strokeStyle = '#fdba74';
+        ctx.beginPath(); ctx.moveTo(cS.x, cS.y); ctx.lineTo(cE.x, cE.y); ctx.stroke();
+
+        // Calculate live Cobb geometry
+        const geom = this.calculateCobbGeometry(this.cobbLine1Start, this.cobbLine1End, shape.start, shape.end);
+        const cM1 = this.imageToCanvas(geom.mid1.x, geom.mid1.y);
+        const cM2 = this.imageToCanvas(geom.mid2.x, geom.mid2.y);
+        const cI  = this.imageToCanvas(geom.intersection.x, geom.intersection.y);
+
+        ctx.strokeStyle = '#fb923c';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(cM1.x, cM1.y); ctx.lineTo(cI.x, cI.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cM2.x, cM2.y); ctx.lineTo(cI.x, cI.y); ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#fb923c';
+        ctx.beginPath(); ctx.arc(cI.x, cI.y, 4, 0, 2 * Math.PI); ctx.fill();
+
+        const label = `Cobb: ${geom.angle.toFixed(1)}°`;
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(cI.x - tw / 2 - 6, cI.y - 24, tw + 12, 18);
+        ctx.fillStyle = '#fb923c';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, cI.x, cI.y - 11);
+      }
+    }
+
     ctx.restore();
   }
 
   renderInteractionPoints() {
     const ctx    = this.ctx;
     const colors = this.activeTool === 'ctr'
-      ? ['#60a5fa', '#60a5fa', '#34d399', '#34d399']
+      ? ['#c084fc', '#c084fc', '#ef4444', '#ef4444', '#facc15', '#facc15']
       : ['#fb923c', '#fb923c', '#fdba74', '#fdba74'];
 
     ctx.save();
@@ -978,8 +1623,13 @@ export class DicomViewer {
       ctx.moveTo(cp.x, cp.y - 10); ctx.lineTo(cp.x, cp.y + 10);
       ctx.stroke();
 
-      // Connect pairs (0→1 and 2→3)
-      if (i % 2 === 1) {
+      // Connect pairs (0→1 for Midline, 4→5 for Thorax)
+      if ((i === 1 || i === 5) && this.activeTool === 'ctr') {
+        const cpPrev = this.imageToCanvas(this.interactionPoints[i - 1].x, this.interactionPoints[i - 1].y);
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(cpPrev.x, cpPrev.y); ctx.lineTo(cp.x, cp.y); ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (i % 2 === 1 && this.activeTool !== 'ctr') {
         const cpPrev = this.imageToCanvas(this.interactionPoints[i - 1].x, this.interactionPoints[i - 1].y);
         ctx.setLineDash([4, 4]);
         ctx.beginPath(); ctx.moveTo(cpPrev.x, cpPrev.y); ctx.lineTo(cp.x, cp.y); ctx.stroke();
@@ -994,16 +1644,14 @@ export class DicomViewer {
 
     const guides = {
       ctr: [
-        '1 / 4 — Klik tepi kiri jantung (heart)',
-        '2 / 4 — Klik tepi kanan jantung',
-        '3 / 4 — Klik tepi kiri dinding dada (thorax)',
-        '4 / 4 — Klik tepi kanan dinding dada',
+        'Langkah 1: Klik & tahan tarik vertikal Midline sepanjang sternum/spine',
+        'Langkah 2: Tarik Garis A dari tengah ke batas kanan jantung',
+        'Langkah 3: Tarik Garis B dari tengah ke batas kiri jantung',
+        'Langkah 4: Tarik Garis C dari iga kanan ke iga kiri',
       ],
       cobb: [
-        '1 / 4 — Klik awal garis atas (endplate superior)',
-        '2 / 4 — Klik akhir garis atas',
-        '3 / 4 — Klik awal garis bawah (endplate inferior)',
-        '4 / 4 — Klik akhir garis bawah → selesai',
+        'Langkah 1: Klik & tahan tarik Garis 1 (endplate superior)',
+        'Langkah 2: Klik & tahan tarik Garis 2 (endplate inferior)',
       ],
     };
 
@@ -1101,6 +1749,9 @@ export class DicomViewer {
         seriesDesc:     this.seriesDesc,
         seriesNumber:   this.seriesNumber,
         modality:       this.modality,
+        pixelSpacing:   this.pixelSpacing,
+        hasPixelSpacing: this.hasPixelSpacing,
+        pixelSpacingSource: this.pixelSpacingSource,
         sliceIndex:     this.numberOfFrames > 1 ? this.currentFrameIndex : this.currentSliceIndex,
         sliceCount:     this.numberOfFrames > 1 ? this.numberOfFrames : this.instanceIds.length,
         isMultiFrame:   this.numberOfFrames > 1,

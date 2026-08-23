@@ -2,6 +2,7 @@
 
 import './style.css';
 import { DicomViewer } from './viewer.js';
+import { initGuidedTour } from './tour.js';
 
 // Global State
 let viewers = [];
@@ -10,7 +11,7 @@ let activePatientId = null;
 let activePatientStudies = [];
 let activeStudyId = null;
 let activeSeriesList = [];
-let viewportSeries = [null, null, null, null];
+let viewportSeries = [null, null, null, null, null, null, null, null, null];
 
 // Auto-detect if running on Orthanc directly or via BFF
 const isLocalBff = window.location.port === '5173' || window.location.port === '3000';
@@ -22,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initLayoutControls();
   initSidebarEvents();
   initModalEvents();
+  initGuidedTour();
   initializeViewer();
 });
 
@@ -163,27 +165,19 @@ function initLayoutControls() {
       
       if (layout === '1x1') {
         layoutGrid.classList.add('grid-1x1');
-        slots[0].classList.remove('hidden');
-        slots[1].classList.add('hidden');
-        slots[2].classList.add('hidden');
-        slots[3].classList.add('hidden');
-        // Force Active Viewport to 0
+        slots.forEach((s, i) => s.classList.toggle('hidden', i >= 1));
         setActiveViewport(0);
       } else if (layout === '1x2') {
         layoutGrid.classList.add('grid-1x2');
-        slots[0].classList.remove('hidden');
-        slots[1].classList.remove('hidden');
-        slots[2].classList.add('hidden');
-        slots[3].classList.add('hidden');
-        if (activeViewportIndex > 1) {
-          setActiveViewport(0);
-        }
+        slots.forEach((s, i) => s.classList.toggle('hidden', i >= 2));
+        if (activeViewportIndex > 1) setActiveViewport(0);
       } else if (layout === '2x2') {
         layoutGrid.classList.add('grid-2x2');
-        slots[0].classList.remove('hidden');
-        slots[1].classList.remove('hidden');
-        slots[2].classList.remove('hidden');
-        slots[3].classList.remove('hidden');
+        slots.forEach((s, i) => s.classList.toggle('hidden', i >= 4));
+        if (activeViewportIndex > 3) setActiveViewport(0);
+      } else if (layout === '3x3') {
+        layoutGrid.classList.add('grid-3x3');
+        slots.forEach((s, i) => s.classList.toggle('hidden', i >= 9));
       }
 
       // Trigger Resize on all active viewers so canvases fit new dimensions
@@ -751,7 +745,7 @@ function updateOverlayText(index, state) {
   modality.textContent = `Modality: ${state.modality}`;
   topRight.appendChild(modality);
 
-  // Bottom Left Overlay (Series)
+  // Bottom Left Overlay (Series & Pixel Spacing Calibration)
   const bottomLeft = slot.querySelector('.overlay-bottom-left');
   bottomLeft.replaceChildren();
   const serDesc = document.createElement('div');
@@ -760,6 +754,15 @@ function updateOverlayText(index, state) {
   const serNum = document.createElement('div');
   serNum.textContent = `Series #: ${state.seriesNumber}`;
   bottomLeft.appendChild(serNum);
+  const spacingDiv = document.createElement('div');
+  if (state.hasPixelSpacing && state.pixelSpacing) {
+    spacingDiv.textContent = `Spacing: ${state.pixelSpacing.x.toFixed(3)} x ${state.pixelSpacing.y.toFixed(3)} mm`;
+    spacingDiv.style.color = '#38bdf8';
+  } else {
+    spacingDiv.textContent = 'Uncalibrated (px)';
+    spacingDiv.style.color = '#a1a1aa';
+  }
+  bottomLeft.appendChild(spacingDiv);
 
   // Bottom Right Overlay (Slice & Window Center/Width)
   const bottomRight = slot.querySelector('.overlay-bottom-right');

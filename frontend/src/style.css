@@ -186,6 +186,7 @@ body {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.5px;
+  color: #ffffff;
 }
 
 .header-logo h1 span {
@@ -573,6 +574,11 @@ body {
   grid-template-rows: 1fr 1fr;
 }
 
+.viewer-workspace.grid-3x3 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+}
+
 /* Viewport Slots */
 .viewport-slot {
   background: #000;
@@ -622,7 +628,27 @@ body {
 .viewport-tools {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tool-group[data-group="specialist"] {
+  border-color: rgba(96, 165, 250, 0.25);
+  background: rgba(96, 165, 250, 0.04);
+}
+
+.tool-group[data-group="presets"] {
+  border-color: rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.04);
 }
 
 .tool-btn, .action-btn {
@@ -1026,4 +1052,172 @@ body {
   padding: 1px 3px;
   border-radius: 2px;
   pointer-events: none;
+}
+
+/* Header Logo Link */
+a.header-logo,
+a.header-logo:visited,
+a.header-logo:hover,
+a.header-logo:active {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+a.header-logo:hover {
+  transform: scale(1.02);
+  opacity: 0.95;
+}
+
+/* Tour Button */
+.btn-tour {
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 12px;
+}
+
+.btn-tour:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+}
+
+/* Interactive Tour Overlay & Popover Modal */
+.tour-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9998;
+  pointer-events: auto;
+  transition: all 0.2s ease;
+}
+
+.tour-spotlight {
+  position: fixed;
+  z-index: 9999;
+  border-radius: 6px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75), 0 0 15px rgba(56, 189, 248, 0.8);
+  border: 2px solid #38bdf8;
+  pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tour-popover {
+  position: fixed;
+  z-index: 10000;
+  width: 350px;
+  background: rgba(24, 24, 27, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  color: #f4f4f5;
+  font-family: var(--font-sans);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tour-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.tour-step-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.tour-popover-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-popover-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #a1a1aa;
+  margin-bottom: 16px;
+}
+
+.tour-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tour-btn-skip {
+  background: transparent;
+  border: none;
+  color: #71717a;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.tour-btn-skip:hover {
+  color: #e4e4e7;
+}
+
+.tour-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tour-btn-nav {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  color: #f4f4f5;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tour-btn-nav:hover:not(:disabled) {
+  background: #3f3f46;
+}
+
+.tour-btn-nav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tour-btn-nav.primary {
+  background: #38bdf8;
+  border-color: #38bdf8;
+  color: #09090b;
+}
+
+.tour-btn-nav.primary:hover:not(:disabled) {
+  background: #0ea5e9;
+  border-color: #0ea5e9;
 }
